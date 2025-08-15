@@ -5,15 +5,15 @@
   "description": "在 Google 上进行网络搜索，返回网页结果与摘要。",
   "author": {
     "name": "晴空",
-    "url": "https://github.com/MaiM-with-u"
+    "url": "https://github.com/XXXxx7258"
   },
-  "license": "GPL-v3.0-or-later",
+  "license": "MIT",
 
   "host_application": {
     "min_version": "0.10.0"
   },
-  "homepage_url": "https://github.com/MaiM-with-u/maibot",
-  "repository_url": "https://github.com/MaiM-with-u/maibot",
+  "homepage_url": "https://github.com/XXXxx7258/google_search_plugin",
+  "repository_url": "https://github.com/XXXxx7258/google_search_plugin",
   "keywords": ["google", "search", "web", "internet", "查询", "搜索"],
   "categories": ["Search", "Utilities"],
 
@@ -44,4 +44,5 @@
       "可配置代理与语言/地区（在插件配置中设置）"
     ]
   }
+
 }
