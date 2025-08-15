@@ -1,0 +1,47 @@
+{
+  "manifest_version": 1,
+  "name": "Google 搜索插件 (Google Search Plugin)",
+  "version": "1.0.0",
+  "description": "在 Google 上进行网络搜索，返回网页结果与摘要。",
+  "author": {
+    "name": "晴空",
+    "url": "https://github.com/MaiM-with-u"
+  },
+  "license": "GPL-v3.0-or-later",
+
+  "host_application": {
+    "min_version": "0.10.0"
+  },
+  "homepage_url": "https://github.com/MaiM-with-u/maibot",
+  "repository_url": "https://github.com/MaiM-with-u/maibot",
+  "keywords": ["google", "search", "web", "internet", "查询", "搜索"],
+  "categories": ["Search", "Utilities"],
+
+  "default_locale": "zh-CN",
+  "locales_path": "_locales",
+
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "search",
+    "components": [
+      {
+        "type": "action",
+        "name": "search_google",
+        "description": "在 Google 上搜索信息",
+        "activation_modes": ["keyword"],
+        "keywords": ["搜索", "谷歌", "Google", "搜一下", "找一下"]
+      },
+      {
+        "type": "command",
+        "name": "google",
+        "description": "使用命令触发 Google 搜索（/google 关键词）",
+        "pattern": "/google"
+      }
+    ],
+    "features": [
+      "Google 关键词搜索",
+      "命令触发与关键词触发",
+      "可配置代理与语言/地区（在插件配置中设置）"
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+googlesearch-python
+aiohttp
+beautifulsoup4
+readability-lxml
+trafilatura
