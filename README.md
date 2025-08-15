@@ -1,4 +1,4 @@
-\# 麦麦Google 搜索插件
+# 麦麦Google 搜索插件
 
 
 
@@ -6,7 +6,7 @@
 
 
 
-\## 1. 安装
+## 1. 安装
 
 
 
@@ -22,7 +22,7 @@ pip install googlesearch-python aiohttp beautifulsoup4 readability-lxml trafilat
 
 
 
-\## 2. 配置 (可选)
+## 2. 配置 (可选)
 
 
 
@@ -30,23 +30,23 @@ pip install googlesearch-python aiohttp beautifulsoup4 readability-lxml trafilat
 
 
 
-\*\*示例 `config.toml`:\*\*
+*\*示例 `config.toml`:\*\*
 
 
 
 ```toml
 
-\[search]
+[search]
 
-\# 如果你所在地区无法直接访问 Google，请设置代理
+# 如果你所在地区无法直接访问 Google，请设置代理
 
-\# 支持 http 和 socks5, 例如: "http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
+# 支持 http 和 socks5, 例如: "http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
 
 proxy = "http://127.0.0.1:7890"
 
 
 
-\# 可以修改搜索地区和语言
+# 可以修改搜索地区和语言
 
 tld = "com.hk"  # 使用香港地区搜索
 
@@ -56,7 +56,7 @@ lang = "zh-tw"  # 使用繁体中文
 
 
 
-\## 3. 使用方法
+## 3. 使用方法
 
 
 
@@ -64,7 +64,7 @@ lang = "zh-tw"  # 使用繁体中文
 
 
 
-\### 工具一: `web\_search` (网络搜索)
+### 工具一: `web\_search` (网络搜索)
 
 
 
@@ -72,23 +72,23 @@ lang = "zh-tw"  # 使用繁体中文
 
 
 
-\*\*参数:\*\*
+*\*参数:\*\*
 
 
 
-\*   `query` (字符串): \*\*必需\*\*，你想搜索的关键词或问题。
+*   `query` (字符串): \*\*必需\*\*，你想搜索的关键词或问题。
 
-\*   `with\_content` (布尔值, 可选):
+*   `with\_content` (布尔值, 可选):
 
 &nbsp;   \*   `true` (默认): 返回搜索结果的同时，抓取每个网页的正文内容。
 
 &nbsp;   \*   `false`: 只返回搜索结果的标题、链接和摘要，不抓取正文。
 
-\*   `max\_results` (整数, 可选): 返回结果的数量，默认为 5。
+*   `max\_results` (整数, 可选): 返回结果的数量，默认为 5。
 
 
 
-\*\*使用示例:\*\*
+*\*使用示例:\*\*
 
 
 
@@ -138,7 +138,7 @@ Python is powerful... and fast; plays well with others; runs everywhere; is frie
 
 
 
-\### 工具二: `fetch\_page` (抓取网页)
+### 工具二: `fetch\_page` (抓取网页)
 
 
 
@@ -146,15 +146,15 @@ Python is powerful... and fast; plays well with others; runs everywhere; is frie
 
 
 
-\*\*参数:\*\*
+*\*参数:\*\*
 
 
 
-\*   `url` (字符串): \*\*必需\*\*，要抓取内容的网页地址。
+*   `url` (字符串): \*\*必需\*\*，要抓取内容的网页地址。
 
 
 
-\*\*使用示例:\*\*
+*\*使用示例:\*\*
 
 
 
@@ -176,7 +176,7 @@ Python is powerful... and fast; plays well with others; runs everywhere; is frie
 
 
 
-\*\*返回内容:\*\*
+*\*返回内容:\*\*
 
 
 
