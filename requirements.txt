@@ -1,5 +1,8 @@
 googlesearch-python
 aiohttp
 beautifulsoup4
+lxml
 readability-lxml
 trafilatura
+charset-normalizer
+aiohttp-socks
