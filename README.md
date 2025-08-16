@@ -1,188 +1,132 @@
-# 麦麦Google 搜索插件
+# Google Search 插件
 
+一个网络搜索和内容提取插件，支持 Google 搜索和网页内容抓取。
 
+## 安装
 
-这是一款集成了 Google 搜索和网页正文提取功能的插件。它允许 AI 代理在互联网上查找信息，并直接阅读网页内容以获得更深入的回答。
-
-
-
-## 1. 安装
-
-
-
-首先，将插件文件放入您的项目插件目录中，然后安装所需的依赖库：
-
-
+### 1. 安装依赖
 
 ```bash
-
-pip install googlesearch-python aiohttp beautifulsoup4 readability-lxml trafilatura
-
+pip install googlesearch-python aiohttp beautifulsoup4 lxml readability-lxml trafilatura charset-normalizer
 ```
 
+如需 SOCKS 代理支持（可选）：
+```bash
+pip install aiohttp-socks
+```
 
+### 2. 启用插件
 
-## 2. 配置 (可选)
+确保插件已在系统中注册并启用。
 
+## 功能说明
 
+### 1. 网络搜索 (web_search)
 
-插件开箱即用。如果你需要通过代理访问 Google 或想更改搜索区域，可以创建一个 `config.toml` 文件进行配置。
+搜索网络并返回结果，支持自动抓取网页正文内容。
 
+**参数：**
+- `query`: 搜索关键词（必填）
+- `with_content`: 是否抓取正文内容（默认：true）
+- `max_results`: 返回结果数量（默认：8）
+- `show_links`: 是否显示链接（默认：true）
 
+**使用示例：**
+```python
+# 基础搜索
+result = await web_search(query="Python教程")
 
-*\*示例 `config.toml`:\*\*
+# 只要标题和链接，不抓取内容
+result = await web_search(query="天气预报", with_content=False)
 
+# 获取更多结果
+result = await web_search(query="机器学习", max_results=10)
+```
 
+### 2. 网页抓取 (fetch_page)
+
+抓取指定网页的正文内容。
+
+**参数：**
+- `url`: 网页地址（必填）
+
+**使用示例：**
+```python
+content = await fetch_page(url="https://example.com/article")
+```
+
+## 配置文件
+
+在 `config.toml` 中配置：
 
 ```toml
-
 [search]
+# Google 搜索设置
+tld = "com"              # 顶级域名 (com/co.jp/com.hk等)
+lang = "zh-cn"           # 语言
+num_results = 8          # 默认结果数
+timeout = 10             # 搜索超时(秒)
+sleep_interval = 0.7     # 请求间隔(秒)
+proxy = ""               # 代理设置，如 "socks5://127.0.0.1:7890"
+user_agent = ""          # 自定义UA，留空使用默认
 
-# 如果你所在地区无法直接访问 Google，请设置代理
+[output]
+# 内容抓取设置
+content_max_chars = 700  # 正文最大长度
+fetch_timeout = 6        # 抓取超时(秒)
+fetch_concurrency = 3    # 并发数
+```
 
-# 支持 http 和 socks5, 例如: "http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
+## 代理设置
 
+支持多种代理配置方式：
+
+1. **配置文件设置**
+```toml
+[search]
 proxy = "http://127.0.0.1:7890"
-
-
-
-# 可以修改搜索地区和语言
-
-tld = "com.hk"  # 使用香港地区搜索
-
-lang = "zh-tw"  # 使用繁体中文
-
+# 或 SOCKS 代理
+proxy = "socks5://127.0.0.1:7890"
 ```
 
-
-
-## 3. 使用方法
-
-
-
-插件提供了两个工具供 AI 调用：
-
-
-
-### 工具一: `web\_search` (网络搜索)
-
-
-
-这是最常用的工具。它执行一次网络搜索，并抓取网页内容进行总结。
-
-
-
-*\*参数:\*\*
-
-
-
-*   `query` (字符串): \*\*必需\*\*，你想搜索的关键词或问题。
-
-*   `with\_content` (布尔值, 可选):
-
-&nbsp;   \*   `true` (默认): 返回搜索结果的同时，抓取每个网页的正文内容。
-
-&nbsp;   \*   `false`: 只返回搜索结果的标题、链接和摘要，不抓取正文。
-
-*   `max\_results` (整数, 可选): 返回结果的数量，默认为 5。
-
-
-
-*\*使用示例:\*\*
-
-
-
-调用 `web\_search` 工具搜索 "Python 的主要特点"。
-
-
-
-```json
-
-{
-
-&nbsp; "tool\_name": "web\_search",
-
-&nbsp; "parameters": {
-
-&nbsp;   "query": "Python 的主要特点"
-
-&nbsp; }
-
-}
-
+2. **环境变量设置**
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890
+# 或
+export ALL_PROXY=socks5://127.0.0.1:7890
 ```
 
+## 常见问题
 
+### 1. 搜索无结果
+- 检查网络连接
+- 尝试设置代理
+- 适当增加 `sleep_interval` 避免触发反爬
 
-\*\*返回内容:\*\*
+### 2. 内容抓取失败
+- 某些网站可能有反爬保护
+- 可以尝试调整 `fetch_timeout`
+- 检查目标网站是否需要登录
 
+### 3. 中文乱码
+- 插件会自动检测编码
+- 如仍有问题，确保安装了 `charset-normalizer`
 
+## 注意事项
 
-```text
+- 请遵守网站的 robots.txt 和使用条款
+- 避免过于频繁的请求，建议保持默认的 `sleep_interval`
+- 部分地区可能需要代理才能访问 Google
 
-1\. Python - 维基百科，自由的百科全书 https://zh.wikipedia.org/wiki/Python
+## 示例
 
-Python是一种广泛使用的高级编程语言...设计哲学强调代码的可读性和简洁的语法...
+```python
+# 搜索最新新闻
+news = await web_search(query="今日新闻", max_results=5)
 
-Python的设计哲学是“优雅”、“明确”、“简单”。它的语法简洁，支持多种编程范式，包括面向对象、命令式、函数式和过程式编程。Python拥有一个庞大而活跃的社区...
+# 搜索技术文档（不需要内容）
+docs = await web_search(query="pandas DataFrame教程", with_content=False)
 
-
-
-2\. Welcome to Python.org https://www.python.org
-
-The official home of the Python Programming Language...
-
-Python is powerful... and fast; plays well with others; runs everywhere; is friendly \& easy to learn; is Open. Whether you're new to programming or an experienced developer, it's easy to learn and use Python...
-
+# 抓取特定文章
+article = await fetch_page(url="https://example.com/blog/post")
 ```
-
-
-
-### 工具二: `fetch\_page` (抓取网页)
-
-
-
-当你已经有一个明确的网址，并想读取它的正文内容时，使用此工具。
-
-
-
-*\*参数:\*\*
-
-
-
-*   `url` (字符串): \*\*必需\*\*，要抓取内容的网页地址。
-
-
-
-*\*使用示例:\*\*
-
-
-
-```json
-
-{
-
-&nbsp; "tool\_name": "fetch\_page",
-
-&nbsp; "parameters": {
-
-&nbsp;   "url": "https://www.python.org/"
-
-&nbsp; }
-
-}
-
-```
-
-
-
-*\*返回内容:\*\*
-
-
-
-```text
-
-Python is powerful... and fast; plays well with others; runs everywhere; is friendly \& easy to learn; is Open. Whether you're new to programming or an experienced developer, it's easy to learn and use Python. Start with our Beginner's Guide...
-
-```
-
