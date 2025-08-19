@@ -15,7 +15,7 @@
   "homepage_url": "https://github.com/XXXxx7258/google_search_plugin",
   "repository_url": "https://github.com/XXXxx7258/google_search_plugin",
   "keywords": ["google", "search", "web", "internet", "查询", "搜索"],
-  "categories": ["Search", "Utilities"],
+  "categories": ["Search", "免费"],
 
   "default_locale": "zh-CN",
   "locales_path": "_locales",
@@ -46,3 +46,4 @@
   }
 
 }
+
