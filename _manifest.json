@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "name": "Google 搜索插件 (Google Search Plugin)",
   "version": "1.0.0",
-  "description": "在 Google 上进行网络搜索，返回网页结果与摘要。",
+  "description": "支持多个搜索引擎的网络搜索插件，具有自动降级功能。",
   "author": {
     "name": "晴空",
     "url": "https://github.com/XXXxx7258"
@@ -14,8 +14,8 @@
   },
   "homepage_url": "https://github.com/XXXxx7258/google_search_plugin",
   "repository_url": "https://github.com/XXXxx7258/google_search_plugin",
-  "keywords": ["google", "search", "web", "internet", "查询", "搜索"],
-  "categories": ["Search", "免费"],
+  "keywords": ["google", "search", "web", "internet", "查询", "搜索", "多引擎"],
+  "categories": ["Search", "Utilities"],
 
   "default_locale": "zh-CN",
   "locales_path": "_locales",
@@ -25,25 +25,18 @@
     "plugin_type": "search",
     "components": [
       {
-        "type": "action",
-        "name": "search_google",
-        "description": "在 Google 上搜索信息",
-        "activation_modes": ["keyword"],
-        "keywords": ["搜索", "谷歌", "Google", "搜一下", "找一下"]
-      },
-      {
-        "type": "command",
-        "name": "google",
-        "description": "使用命令触发 Google 搜索（/google 关键词）",
-        "pattern": "/google"
+        "type": "tool",
+        "name": "web_search",
+        "description": "进行网络搜索并聚合结果"
       }
     ],
     "features": [
-      "Google 关键词搜索",
-      "命令触发与关键词触发",
-      "可配置代理与语言/地区（在插件配置中设置）"
+      "多引擎支持：Google、Bing、搜狗",
+      "自动降级机制",
+      "可配置的搜索引擎顺序",
+      "重试机制",
+      "丰富的配置选项"
     ]
   }
 
 }
-
