@@ -1,132 +1,114 @@
-# Google Search 插件
+# Google Search Plugin
 
-一个网络搜索和内容提取插件，支持 Google 搜索和网页内容抓取。
+一个支持多个搜索引擎的网络搜索插件，具有自动降级功能和丰富的配置选项。
 
-## 安装
+## 功能特点
 
-### 1. 安装依赖
+- 支持多个搜索引擎：Google、Bing、Sogou
+- 自动降级机制：当某个搜索引擎不可用时自动切换
+- 简单易用的接口
+- 丰富的配置选项
+- 支持重试机制
+- 可自定义 User-Agent
 
-```bash
-pip install googlesearch-python aiohttp beautifulsoup4 lxml readability-lxml trafilatura charset-normalizer
-```
+## 使用方法
 
-如需 SOCKS 代理支持（可选）：
-```bash
-pip install aiohttp-socks
-```
+### 基本搜索
 
-### 2. 启用插件
-
-确保插件已在系统中注册并启用。
-
-## 功能说明
-
-### 1. 网络搜索 (web_search)
-
-搜索网络并返回结果，支持自动抓取网页正文内容。
-
-**参数：**
-- `query`: 搜索关键词（必填）
-- `with_content`: 是否抓取正文内容（默认：true）
-- `max_results`: 返回结果数量（默认：8）
-- `show_links`: 是否显示链接（默认：true）
-
-**使用示例：**
 ```python
-# 基础搜索
-result = await web_search(query="Python教程")
-
-# 只要标题和链接，不抓取内容
-result = await web_search(query="天气预报", with_content=False)
-
-# 获取更多结果
-result = await web_search(query="机器学习", max_results=10)
+# 执行搜索
+results = await web_search.execute({
+    "query": "搜索关键词",
+    "with_content": True,    # 是否抓取内容（可选）
+    "max_results": 5         # 返回结果数量（可选）
+})
 ```
 
-### 2. 网页抓取 (fetch_page)
+### 搜索引擎降级策略
 
-抓取指定网页的正文内容。
+插件会根据配置的默认搜索引擎顺序尝试，如果某个搜索引擎失败或被禁用，会自动尝试下一个：
 
-**参数：**
-- `url`: 网页地址（必填）
+1. **默认引擎**（可配置：google/bing/sogou）
+2. **备用引擎1**
+3. **备用引擎2**
 
-**使用示例：**
-```python
-content = await fetch_page(url="https://example.com/article")
-```
+## 配置说明
 
-## 配置文件
+插件配置文件位于 `plugins/google_search_plugin/config.toml`，包含以下配置项：
 
-在 `config.toml` 中配置：
+### 基础配置
 
 ```toml
 [search]
-# Google 搜索设置
-tld = "com"              # 顶级域名 (com/co.jp/com.hk等)
-lang = "zh-cn"           # 语言
-num_results = 8          # 默认结果数
-timeout = 10             # 搜索超时(秒)
-sleep_interval = 0.7     # 请求间隔(秒)
-proxy = ""               # 代理设置，如 "socks5://127.0.0.1:7890"
-user_agent = ""          # 自定义UA，留空使用默认
-
-[output]
-# 内容抓取设置
-content_max_chars = 700  # 正文最大长度
-fetch_timeout = 6        # 抓取超时(秒)
-fetch_concurrency = 3    # 并发数
+# 默认搜索引擎 (google/bing/sogou)
+default_engine = "google"
+# 默认返回结果数量
+max_results = 5
+# 搜索超时时间（秒）
+timeout = 30
+# 失败重试次数
+retry_count = 2
+# 重试延迟（秒）
+retry_delay = 1.0
 ```
 
-## 代理设置
+### 搜索引擎配置
 
-支持多种代理配置方式：
-
-1. **配置文件设置**
 ```toml
-[search]
-proxy = "http://127.0.0.1:7890"
-# 或 SOCKS 代理
-proxy = "socks5://127.0.0.1:7890"
+[engines.google]
+# 是否启用Google搜索
+enabled = true
+# Google搜索间隔（秒），避免429错误
+pause_time = 5.0
+# 搜索语言
+language = "zh-cn"
+# 搜索国家/地区
+country = "cn"
+
+[engines.bing]
+# 是否启用Bing搜索
+enabled = true
+# Bing市场区域
+market = "zh-CN"
+# 搜索语言
+language = "zh-CN"
+
+[engines.sogou]
+# 是否启用搜狗搜索
+enabled = true
+# 搜索类型 (web/news)
+type = "web"
 ```
 
-2. **环境变量设置**
+### 高级配置
+
+```toml
+[advanced]
+# User-Agent列表
+user_agents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+]
+# 是否抓取网页内容
+fetch_content = true
+# 内容抓取超时（秒）
+content_timeout = 10
+# 最大内容长度
+max_content_length = 5000
+```
+
+## 依赖安装
+
 ```bash
-export HTTPS_PROXY=http://127.0.0.1:7890
-# 或
-export ALL_PROXY=socks5://127.0.0.1:7890
+pip install googlesearch-python aiohttp beautifulsoup4 lxml
 ```
-
-## 常见问题
-
-### 1. 搜索无结果
-- 检查网络连接
-- 尝试设置代理
-- 适当增加 `sleep_interval` 避免触发反爬
-
-### 2. 内容抓取失败
-- 某些网站可能有反爬保护
-- 可以尝试调整 `fetch_timeout`
-- 检查目标网站是否需要登录
-
-### 3. 中文乱码
-- 插件会自动检测编码
-- 如仍有问题，确保安装了 `charset-normalizer`
 
 ## 注意事项
 
-- 请遵守网站的 robots.txt 和使用条款
-- 避免过于频繁的请求，建议保持默认的 `sleep_interval`
-- 部分地区可能需要代理才能访问 Google
-
-## 示例
-
-```python
-# 搜索最新新闻
-news = await web_search(query="今日新闻", max_results=5)
-
-# 搜索技术文档（不需要内容）
-docs = await web_search(query="pandas DataFrame教程", with_content=False)
-
-# 抓取特定文章
-article = await fetch_page(url="https://example.com/blog/post")
-```
+- Google 搜索有频率限制，建议将 `pause_time` 设置为 5 秒或更长
+- 可以通过禁用某些搜索引擎来加快搜索速度
+- 如果某个搜索引擎经常失败，可以通过配置文件禁用它
+- 搜索结果会自动格式化，包含标题、链接和摘要
+- 插件会自动处理搜索失败的情况，并尝试备用搜索引擎
