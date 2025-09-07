@@ -36,10 +36,10 @@ USER_AGENTS = [
 
 
 class WebSearchTool(BaseTool):
-    """简化的 Web 搜索工具"""
+    """Web 搜索工具"""
     
     name = "web_search"
-    description = "进行网络搜索并聚合结果"
+    description = "当需要获取即时性的信息时，执行网络搜索，获得最新的相关网页结果。"
     parameters = [
         ("query", ToolParamType.STRING, "搜索关键词或问题", True, None),
         ("with_content", ToolParamType.BOOLEAN, "是否抓取正文内容", False, None),
@@ -191,7 +191,7 @@ class WebSearchTool(BaseTool):
 
 @register_plugin
 class google_search_simple(BasePlugin):
-    """简化的 Google Search 插件"""
+    """Google Search 插件"""
     
     plugin_name: str = "google_search"
     enable_plugin: bool = True
@@ -255,4 +255,5 @@ class google_search_simple(BasePlugin):
         """获取插件提供的组件"""
         return [
             (WebSearchTool.get_tool_info(), WebSearchTool),
+
         ]
