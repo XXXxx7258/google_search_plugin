@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
-  "name": "Google 搜索插件 (Google Search Plugin)",
+  "name": "Google 搜索以及缩写翻译插件 (Google Search and Abbreviation Translation Plugin)",
   "version": "1.0.0",
-  "description": "支持多个搜索引擎的网络搜索插件，具有自动降级功能。",
+  "description": "支持多个搜索引擎的网络搜索以及聚合翻译搜索插件，具有自动降级功能。",
   "author": {
     "name": "晴空",
     "url": "https://github.com/XXXxx7258"
@@ -48,3 +48,4 @@
   }
 
 }
+
