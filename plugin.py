@@ -25,6 +25,9 @@ from .search_engines.google import GoogleEngine
 from .search_engines.bing import BingEngine
 from .search_engines.sogou import SogouEngine
 
+# 导入翻译工具
+from .tools.abbreviation_tool import AbbreviationTool
+
 logger = get_logger("google_search")
 
 # User-Agent 池
@@ -275,5 +278,5 @@ class google_search_simple(BasePlugin):
         """获取插件提供的组件"""
         return [
             (WebSearchTool.get_tool_info(), WebSearchTool),
-
+            (AbbreviationTool.get_tool_info(), AbbreviationTool),
         ]
