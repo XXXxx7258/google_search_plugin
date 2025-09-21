@@ -14,8 +14,8 @@
   },
   "homepage_url": "https://github.com/XXXxx7258/google_search_plugin",
   "repository_url": "https://github.com/XXXxx7258/google_search_plugin",
-  "keywords": ["google", "search", "web", "internet", "查询", "搜索", "多引擎"],
-  "categories": ["Search", "Utilities"],
+  "keywords": ["google", "search", "web", "internet", "查询", "搜索", "多引擎", "翻译", "缩写", "nbnhhsh"],
+  "categories": ["Search", "Utilities", "Translation"],
 
   "default_locale": "zh-CN",
   "locales_path": "_locales",
@@ -28,6 +28,11 @@
         "type": "tool",
         "name": "web_search",
         "description": "进行网络搜索并聚合结果"
+      },
+      {
+        "type": "tool",
+        "name": "abbreviation_translate",
+        "description": "翻译中文网络缩写词汇"
       }
     ],
     "features": [
@@ -35,7 +40,10 @@
       "自动降级机制",
       "可配置的搜索引擎顺序",
       "重试机制",
-      "丰富的配置选项"
+      "丰富的配置选项",
+      "中文缩写翻译功能",
+      "神奇海螺API集成",
+      "翻译结果缓存机制"
     ]
   }
 
