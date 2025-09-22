@@ -101,11 +101,7 @@ max_content_length = 5000
 
 ## 依赖安装
 
-```bash
-pip install googlesearch-python aiohttp beautifulsoup4 lxml readability-lxml trafilatura charset-normalizer aiohttp-socks
-```
-
-或者使用 requirements.txt 安装所有依赖：
+在插件目录下使用 requirements.txt 安装所有依赖：
 
 ```bash
 pip install -r requirements.txt
@@ -118,5 +114,6 @@ pip install -r requirements.txt
 - 如果某个搜索引擎经常失败，可以通过配置文件禁用它
 - 搜索结果会自动格式化，包含标题、链接和摘要
 - 插件会自动处理搜索失败的情况，并尝试备用搜索引擎
+
 
 
