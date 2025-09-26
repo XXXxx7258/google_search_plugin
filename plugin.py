@@ -67,8 +67,9 @@ class WebSearchTool(BaseTool):
         }
         
         bing_config = {
-            "market": config.get("engines", {}).get("bing", {}).get("market", "zh-CN"),
-            "language": config.get("engines", {}).get("bing", {}).get("language", "zh-CN"),
+            "region": config.get("engines", {}).get("bing", {}).get("region", "zh-CN"),
+            "setlang": config.get("engines", {}).get("bing", {}).get("setlang", "zh"),
+            "count": config.get("engines", {}).get("bing", {}).get("count", 10),
         }
         
         sogou_config = {
@@ -156,7 +157,18 @@ class WebSearchTool(BaseTool):
                     logger.warning(f"抓取内容失败，URL: {url}, 状态码: {response.status}")
                     return None
                 
-                html = await response.text()
+                # 智能解码
+                html_bytes = await response.read()
+                try:
+                    # 尝试使用 aiohttp 推断的编码
+                    html = html_bytes.decode(response.charset or 'utf-8')
+                except (UnicodeDecodeError, TypeError):
+                    # 如果失败，尝试 gbk
+                    try:
+                        html = html_bytes.decode('gbk', errors='ignore')
+                    except UnicodeDecodeError:
+                        # 最终回退
+                        html = html_bytes.decode('utf-8', errors='ignore')
                 
                 # 使用 readability-lxml 提取正文
                 doc = Document(html)
@@ -257,7 +269,9 @@ class google_search_simple(BasePlugin):
             },
             "bing": {
                 "enabled": ConfigField(type=bool, default=True, description="是否启用Bing搜索"),
-                "market": ConfigField(type=str, default="zh-CN", description="Bing市场区域"),
+                "region": ConfigField(type=str, default="zh-CN", description="Bing搜索区域代码 (例如 'zh-CN', 'en-US')"),
+                "setlang": ConfigField(type=str, default="zh", description="Bing界面和搜索结果语言代码 (例如 'zh', 'en')"),
+                "count": ConfigField(type=int, default=10, description="Bing单次请求返回的结果数量"),
             },
             "sogou": {
                 "enabled": ConfigField(type=bool, default=True, description="是否启用搜狗搜索"),
