@@ -1,5 +1,6 @@
 import random
 import warnings
+import logging
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 import aiohttp
 from dataclasses import dataclass
@@ -7,6 +8,7 @@ from typing import List, Optional, Dict, Any
 import urllib.parse
 
 warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
+logger = logging.getLogger(__name__)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
@@ -54,13 +56,13 @@ class BaseSearchEngine:
                     url, headers=headers, data=data, timeout=aiohttp.ClientTimeout(total=self.TIMEOUT), proxy=self.proxy
                 ) as resp:
                     resp.raise_for_status()
-                    return await resp.text(encoding="utf-8")
+                    return await resp.text()
             else:
                 async with session.get(
                     url, headers=headers, timeout=aiohttp.ClientTimeout(total=self.TIMEOUT), proxy=self.proxy
                 ) as resp:
                     resp.raise_for_status()
-                    return await resp.text(encoding="utf-8")
+                    return await resp.text()
 
     def tidy_text(self, text: str) -> str:
         return text.strip().replace("\n", " ").replace("\r", " ").replace("  ", " ")
@@ -74,6 +76,7 @@ class BaseSearchEngine:
             if not links_selector:
                 return []
             links = soup.select(links_selector)
+            logger.info(f"Found {len(links)} link elements using selector '{links_selector}'")
 
             results = []
             title_selector = self._set_selector("title")
@@ -96,7 +99,8 @@ class BaseSearchEngine:
                 if title and url:
                     results.append(SearchResult(title=title, url=str(url), snippet=snippet, abstract=snippet, rank=idx))
 
+            logger.info(f"Returning {len(results[:num_results])} search results for query '{query}'")
             return results[:num_results]
         except Exception as e:
-            print(f"Error in search for query {query}: {e}")
+            logger.error(f"Error in search for query {query}: {e}", exc_info=True)
             return []
