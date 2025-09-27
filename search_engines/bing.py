@@ -1,6 +1,9 @@
+import logging
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode
 from .base import BaseSearchEngine, SearchResult
+
+logger = logging.getLogger(__name__)
 
 class BingEngine(BaseSearchEngine):
     """Bing 搜索引擎实现"""
@@ -8,7 +11,6 @@ class BingEngine(BaseSearchEngine):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.base_urls = ["https://cn.bing.com", "https://www.bing.com"]
-        self.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 6.1; rv:84.0) Gecko/20100101 Firefox/84.0"})
         self.region = self.config.get("region", "zh-CN")
         self.setlang = self.config.get("setlang", "zh")
         self.count = self.config.get("count", 10)
@@ -16,9 +18,9 @@ class BingEngine(BaseSearchEngine):
     def _set_selector(self, selector: str) -> str:
         """获取页面元素选择器"""
         selectors = {
-            "url": "div.b_attribution cite",
-            "title": "h2",
-            "text": "div.b_caption p",
+            "url": "h2 > a",
+            "title": "h2 > a",
+            "text": ".b_caption > p",
             "links": "ol#b_results > li.b_algo",
             "next": 'div#b_content nav[role="navigation"] a.sb_pagN',
         }
@@ -37,4 +39,5 @@ class BingEngine(BaseSearchEngine):
         
         query_string = urlencode(params)
         search_url = f"{base_url}/search?{query_string}"
+        logger.info(f"Requesting Bing search URL: {search_url}")
         return await self._get_html(search_url)
