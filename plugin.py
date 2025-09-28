@@ -1,0 +1,412 @@
+import os
+import asyncio
+import random
+import time
+from typing import List, Tuple, Type, Dict, Any, Optional
+from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
+from dataclasses import dataclass
+
+import aiohttp
+from bs4 import BeautifulSoup
+from readability import Document
+
+from src.common.logger import get_logger
+from src.plugin_system import (
+    BasePlugin,
+    register_plugin,
+    BaseTool,
+    ComponentInfo,
+    ConfigField,
+    ToolParamType,
+    llm_api,
+    message_api
+)
+
+# 导入搜索引擎
+from .search_engines.base import SearchResult
+from .search_engines.google import GoogleEngine
+from .search_engines.bing import BingEngine
+from .search_engines.sogou import SogouEngine
+
+# 导入翻译工具
+from .tools.abbreviation_tool import AbbreviationTool
+
+logger = get_logger("google_search")
+
+# User-Agent 池
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+]
+
+
+class WebSearchTool(BaseTool):
+    """Web 搜索工具"""
+    
+    name = "web_search"
+    description = "智能网络搜索工具。当需要回答关于时事、特定知识、人物、概念或任何当前信息的问题时，请使用此工具。它能理解对话上下文，自动搜索并总结信息，以提供一个全面、准确的回答。适用于处理需要外部世界知识才能解答的各种问题。"
+    parameters = [
+        ("question", ToolParamType.STRING, "需要搜索或解答的原始问题", True, None),
+    ]
+    available_for_llm = True
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._initialize_engines()
+
+    def _initialize_engines(self) -> None:
+        """初始化搜索引擎"""
+        config = self.plugin_config
+        engines_config = config.get("engines", {})
+        backend_config = config.get("search_backend", {})
+        
+        # 将顶层配置注入到每个引擎
+        common_config = {
+            "timeout": backend_config.get("timeout", 20),
+            "proxy": backend_config.get("proxy")
+        }
+        
+        google_config = {**engines_config.get("google", {}), **common_config}
+        bing_config = {**engines_config.get("bing", {}), **common_config}
+        sogou_config = {**engines_config.get("sogou", {}), **common_config}
+
+        self.google = GoogleEngine(google_config)
+        self.bing = BingEngine(bing_config)
+        self.sogo = SogouEngine(sogou_config)
+        
+        # 存储配置供后续使用
+        self.model_config = config.get("model_config", {})
+        self.backend_config = config.get("search_backend", {})
+
+    async def execute(self, function_args: dict) -> dict:
+        """执行搜索"""
+        question = function_args.get("question", "").strip()
+        if not question:
+            return {"name": self.name, "content": "问题为空，无法执行搜索。"}
+
+        try:
+            logger.info(f"开始执行模型驱动的智能搜索，原始问题: {question}")
+            result_content = await self._execute_model_driven_search(question)
+            return {"name": self.name, "content": result_content}
+        except Exception as e:
+            logger.error(f"模型驱动搜索执行异常: {e}", exc_info=True)
+            return {"name": self.name, "content": f"智能搜索失败: {str(e)}"}
+
+    async def _execute_model_driven_search(self, question: str) -> str:
+        """执行模型驱动的智能搜索流程"""
+        # 1. 获取全局上下文
+        time_gap = self.model_config.get("context_time_gap", 300)
+        max_limit = self.model_config.get("context_max_limit", 15)
+        context_messages = message_api.get_messages_by_time(
+            start_time=time.time() - time_gap,
+            end_time=time.time(),
+            limit=max_limit
+        )
+        context_str = message_api.build_readable_messages_to_str(context_messages)
+
+        # 2. 构建查询重写Prompt
+        rewrite_prompt = self._build_rewrite_prompt(question, context_str)
+        
+        # 3. 调用LLM进行查询重写
+        logger.info("调用LLM进行查询重写...")
+        rewritten_query = await self._call_llm(rewrite_prompt)
+        if not rewritten_query or "无需搜索" in rewritten_query:
+            logger.info("模型判断无需搜索或无法生成搜索词。")
+            return rewritten_query or "根据上下文分析，我无法确定需要搜索的具体内容。"
+        
+        logger.info(f"模型重写后的搜索查询: {rewritten_query}")
+
+        # 4. 执行后端搜索
+        max_results = self.backend_config.get("max_results", 5)
+        search_results = await self._search_with_fallback(rewritten_query, max_results)
+
+        if not search_results:
+            return f"关于「{rewritten_query}」，我没有找到相关的网络信息。"
+
+        # 5. (可选) 抓取内容
+        if self.backend_config.get("fetch_content", True):
+            search_results = await self._fetch_content_for_results(search_results)
+
+        # 6. 构建总结Prompt
+        summarize_prompt = self._build_summarize_prompt(question, rewritten_query, search_results)
+
+        # 7. 调用LLM进行总结
+        logger.info("调用LLM对搜索结果进行总结...")
+        final_answer = await self._call_llm(summarize_prompt)
+        
+        return final_answer
+
+    async def _call_llm(self, prompt: str) -> str:
+        """统一的LLM调用函数"""
+        try:
+            # 智能选择模型
+            models = llm_api.get_available_models()
+            if not models:
+                raise ValueError("系统中没有可用的LLM模型配置。")
+
+            # 从本插件配置中获取目标模型名称，默认为 'replyer'
+            target_model_name = self.model_config.get("model_name", "replyer")
+            model_config = models.get(target_model_name)
+
+            # 如果找不到用户指定的模型，则记录警告并使用默认模型
+            if not model_config:
+                logger.warning(f"在系统配置中未找到名为 '{target_model_name}' 的模型，将回退到系统默认模型。")
+                default_model_name, model_config = next(iter(models.items()))
+                logger.info(f"使用系统默认模型: {default_model_name}")
+            else:
+                logger.info(f"使用模型: {target_model_name}")
+
+            # 获取温度配置
+            temperature = self.model_config.get("temperature")
+
+            # 直接使用系统llm_api调用选定的模型
+            success, content, _, _ = await llm_api.generate_with_model(
+                prompt,
+                model_config,
+                temperature=temperature
+            )
+            if success:
+                return content.strip() if content else ""
+            else:
+                logger.error(f"调用系统LLM API失败: {content}")
+                return f"在处理信息时遇到了一个内部错误: {content}"
+        except Exception as e:
+            logger.error(f"调用LLM API时出错: {e}")
+            return f"在处理信息时遇到了一个内部错误: {e}"
+
+    def _build_rewrite_prompt(self, question: str, context: str) -> str:
+        """构建用于查询重写的Prompt"""
+        return f"""
+        [任务]
+        你是一个专业的搜索查询分析师。你的任务是根据用户当前的提问和最近的聊天记录，生成一个最适合在搜索引擎中使用的高效、精确的关键词。
+
+        [聊天记录]
+        {context}
+
+        [用户当前提问]
+        {question}
+
+        [要求]
+        1.  分析聊天记录和当前提问，理解用户的真实意图。
+        2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
+        3.  如果提问模糊（如使用了“它”、“那个”等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
+        4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
+        5.  输出的关键词应该简洁、明确，适合搜索引擎。
+
+        [输出]
+        请只输出最终的搜索关键词，不要包含任何其他解释或说明。
+        """
+
+    def _build_summarize_prompt(self, original_question: str, search_query: str, results: List[SearchResult]) -> str:
+        """构建用于总结搜索结果的Prompt"""
+        formatted_results = self._format_results(results)
+        return f"""
+        [任务]
+        你是一个专业的网络信息整合专家。你的任务是根据用户原始问题和一系列从互联网上搜索到的资料，给出一个全面、准确、简洁的回答。
+
+        [用户原始问题]
+        {original_question}
+
+        [你用于搜索的关键词]
+        {search_query}
+
+        [搜索到的资料]
+        {formatted_results}
+
+        [要求]
+        1.  仔细阅读所有资料，并围绕用户的原始问题进行回答。
+        2.  答案应该自然流畅，像是你自己总结的，而不是简单的资料拼接。
+        3.  如果资料中有相互矛盾的信息，请客观地指出来。
+        4.  如果资料不足以回答问题，请诚实地说明。
+        5.  不要在回答中提及你查阅了资料，直接给出答案。
+
+        [你的回答]
+        """
+
+    
+    async def _search_with_fallback(self, query: str, num_results: int) -> List[SearchResult]:
+        """带降级的搜索"""
+        config = self.plugin_config
+        engines_config = self.plugin_config.get("engines", {})
+        
+        # 获取默认搜索引擎顺序
+        default_engine = self.backend_config.get("default_engine", "google")
+        
+        # 定义搜索引擎顺序
+        engine_order = []
+        if default_engine == "google":
+            engine_order = [("google", self.google), ("bing", self.bing), ("sogou", self.sogo)]
+        elif default_engine == "bing":
+            engine_order = [("bing", self.bing), ("google", self.google), ("sogou", self.sogo)]
+        elif default_engine == "sogou":
+            engine_order = [("sogou", self.sogo), ("google", self.google), ("bing", self.bing)]
+        
+        # 按顺序尝试搜索引擎
+        for engine_name, engine in engine_order:
+            # 检查引擎是否启用
+            if not engines_config.get(engine_name, {}).get("enabled", True):
+                logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
+                continue
+                
+            try:
+                # 关键改动：调用基类中统一的、带重试的方法
+                results = await engine.search(query, num_results)
+                if results:
+                    logger.info(f"{engine_name} 搜索成功，返回 {len(results)} 条结果")
+                    return results
+            except Exception as e:
+                logger.warning(f"{engine_name} 搜索失败: {e}")
+        return []
+    
+    async def _fetch_page_content(self, session: aiohttp.ClientSession, url: str) -> Optional[str]:
+        """抓取单个页面的正文内容"""
+        timeout = self.backend_config.get("content_timeout", 10)
+        max_length = self.backend_config.get("max_content_length", 3000)
+        
+        try:
+            # 随机选择 User-Agent
+            headers = {"User-Agent": random.choice(USER_AGENTS)}
+            
+            async with session.get(url, timeout=timeout, headers=headers, proxy=self.plugin_config.get("proxy")) as response:
+                if response.status != 200:
+                    logger.warning(f"抓取内容失败，URL: {url}, 状态码: {response.status}")
+                    return None
+                
+                # 智能解码
+                html_bytes = await response.read()
+                try:
+                    # 尝试使用 aiohttp 推断的编码
+                    html = html_bytes.decode(response.charset or 'utf-8')
+                except (UnicodeDecodeError, TypeError):
+                    # 如果失败，尝试 gbk
+                    try:
+                        html = html_bytes.decode('gbk', errors='ignore')
+                    except UnicodeDecodeError:
+                        # 最终回退
+                        html = html_bytes.decode('utf-8', errors='ignore')
+                
+                # 使用 readability-lxml 提取正文
+                doc = Document(html)
+                summary_html = doc.summary()
+                
+                # 使用 BeautifulSoup 清理并提取文本
+                soup = BeautifulSoup(summary_html, 'lxml')
+                content_text = soup.get_text(separator='\n', strip=True)
+                
+                # 截断到最大长度
+                return content_text[:max_length]
+                
+        except asyncio.TimeoutError:
+            logger.warning(f"抓取内容超时: {url}")
+            return None
+        except Exception as e:
+            logger.error(f"抓取内容时发生未知错误: {url}, 错误: {e}")
+            return None
+
+    async def _fetch_content_for_results(self, results: List[SearchResult]) -> List[SearchResult]:
+        """为搜索结果并发抓取内容，增强了异常处理和格式化。"""
+
+        urls_to_fetch = [result.url for result in results if result.url]
+        if not urls_to_fetch:
+            return results
+
+        async with aiohttp.ClientSession(trust_env=True) as session:
+            tasks = [self._fetch_page_content(session, url) for url in urls_to_fetch]
+            content_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            content_idx = 0
+            for result in results:
+                if result.url:
+                    if content_idx < len(content_results):
+                        content_or_exc = content_results[content_idx]
+                        
+                        if isinstance(content_or_exc, str) and content_or_exc:
+                            result.abstract = f"{result.abstract}\n{content_or_exc}"
+                        elif isinstance(content_or_exc, Exception):
+                            logger.warning(f"抓取 {result.url} 内容时发生异常: {content_or_exc}")
+                        
+                        content_idx += 1
+        
+        return results
+    
+    def _format_results(self, results: List[SearchResult]) -> str:
+        """格式化搜索结果"""
+        lines = []
+        
+        for idx, result in enumerate(results, start=1):
+            # 标题行
+            header = f"{idx}. {result.title}"
+            if result.url:
+                header += f" {result.url}"
+            lines.append(header)
+            
+            # 摘要
+            if result.abstract:
+                lines.append(result.abstract)
+            
+            # 空行分隔
+            lines.append("")
+        
+        return "\n".join(lines).strip()
+
+
+@register_plugin
+class google_search_simple(BasePlugin):
+    """Google Search 插件"""
+    
+    plugin_name: str = "google_search"
+    enable_plugin: bool = True
+    dependencies: List[str] = []
+    python_dependencies: List[str] = [
+        "aiohttp>=3.8.0",
+        "beautifulsoup4>=4.11.0",
+        "lxml>=4.9.0",
+        "readability-lxml>=0.8.1",
+        "googlesearch-python>=1.2.3",
+    ]
+    config_file_name: str = "config.toml"
+    
+    config_schema: dict = {
+        "plugin": {
+            "name": ConfigField(type=str, default="google_search", description="插件名称"),
+            "version": ConfigField(type=str, default="3.0.0", description="插件版本"),
+            "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
+        },
+        "model_config": {
+            "model_name": ConfigField(type=str, default="replyer", description="指定用于搜索和总结的系统模型名称。默认为 'replyer'，即系统主回复模型。"),
+            "temperature": ConfigField(type=float, default=0.7, description="模型生成温度。如果留空，则使用所选模型的默认温度。"),
+            "context_time_gap": ConfigField(type=int, default=300, description="获取最近多少秒的全局聊天记录作为上下文。"),
+            "context_max_limit": ConfigField(type=int, default=15, description="最多获取多少条全局聊天记录作为上下文。"),
+        },
+        "search_backend": {
+            "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou)"),
+            "max_results": ConfigField(type=int, default=5, description="默认返回结果数量"),
+            "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
+            "proxy": ConfigField(type=str, default="", description="用于搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。如果留空则不使用代理。"),
+            "fetch_content": ConfigField(type=bool, default=True, description="是否抓取网页内容"),
+            "content_timeout": ConfigField(type=int, default=10, description="内容抓取超时（秒）"),
+            "max_content_length": ConfigField(type=int, default=3000, description="最大内容长度"),
+        },
+        "engines": {
+            "google": {
+                "enabled": ConfigField(type=bool, default=True, description="是否启用Google搜索"),
+                "language": ConfigField(type=str, default="zh-cn", description="搜索语言"),
+            },
+            "bing": {
+                "enabled": ConfigField(type=bool, default=True, description="是否启用Bing搜索"),
+                "region": ConfigField(type=str, default="zh-CN", description="Bing搜索区域代码"),
+            },
+            "sogou": {
+                "enabled": ConfigField(type=bool, default=True, description="是否启用搜狗搜索"),
+            },
+        }
+    }
+    
+    def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
+        """获取插件提供的组件"""
+        return [
+            (WebSearchTool.get_tool_info(), WebSearchTool),
+            (AbbreviationTool.get_tool_info(), AbbreviationTool),
+        ]
