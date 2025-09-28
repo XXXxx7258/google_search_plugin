@@ -1,119 +1,71 @@
-# Google Search Plugin融合缩写翻译工具版（！！使用此插件需要在bot_config里开启工具调用！！）
+# Search 插件
 
-一个支持多个搜索引擎的网络搜索以及内嵌自动判断并搜寻网络黑话和缩写（如自动翻译yysy，kksk）的插件，让bot不再那么呆（比如一本正经的解释群友的抽象），具有自动降级功能和丰富的配置选项。
+这是一个搜索插件，还有缩写翻译
 
-## 功能特点
+## 工作流程
 
-- 支持多个搜索引擎：Google、Bing、Sogou
-- 自动降级机制：当某个搜索引擎不可用时自动切换
-- 简单易用的接口
-- 丰富的配置选项
-- 支持重试机制
-- 可自定义 User-Agent
+1.  **接收问题**: 插件接收到用户的原始问题。
+2.  **查询重写**: 插件内部的LLM结合聊天上下文，将原始问题重写为一个或多个精确的搜索关键词。
+3.  **后端搜索**: 使用重写后的关键词，调用Google、Bing等搜索引擎执行搜索。
+4.  **内容抓取**: (可选) 抓取搜索结果网页的主要内容。
+5.  **阅读总结**: 内部LLM阅读所有搜索到的材料。
+6.  **生成答案**: LLM根据阅读的材料，生成最终的总结性答案并返回。
 
-## 使用方法
+## 🔧 配置说明
 
-### 基本搜索
+插件的配置在 `config/plugins/google_search_plugin.toml` 文件中。
 
-```python
-# 执行搜索
-results = await web_search.execute({
-    "query": "搜索关键词",
-    "with_content": True,    # 是否抓取内容（可选）
-    "max_results": 5         # 返回结果数量（可选）
-})
-```
+此插件默认使用系统配置的主模型进行智能搜索，但你也可以通过以下配置项进行微调。
 
-### 搜索引擎降级策略
+### `[model_config]`
+- `model_name` (str): 指定一个在系统配置中存在的模型名称，用于本次搜索。默认为 "replyer"，即系统主回复模型。如果指定的模型不存在，会自动回退到主回复模型。
+- `temperature` (float): 单独设置本次搜索时模型的温度。默认为 0.7。
+- `context_time_gap` (int): 获取最近多少秒的**全局**聊天记录作为上下文。默认 300。
+- `context_max_limit` (int): 最多获取多少条**全局**聊天记录作为上下文。默认 15。
 
-插件会根据配置的默认搜索引擎顺序尝试，如果某个搜索引擎失败或被禁用，会自动尝试下一个：
+### `[search_backend]`
+这里配置供模型调用的“后端”搜索引擎的行为。
 
-1. **默认引擎**（可配置：google/bing/sogou）
-2. **备用引擎1**
-3. **备用引擎2**
+- `default_engine` (str): 默认使用的搜索引擎 (`google`, `bing`, `sogou`)。
+- `max_results` (int): 每次搜索返回给模型阅读的结果数量。
+- `timeout` (int): 后端搜索引擎的超时时间。
+- `proxy` (str): 用于后端搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。默认为空字符串，表示不使用代理。
+- `fetch_content` (bool): 是否抓取网页正文供模型阅读。
+- `content_timeout` (int): 网页抓取的超时时间。
+- `max_content_length` (int): 抓取的单个网页最大内容长度。
 
-## 配置说明
+### `[engines]`
+对每个具体搜索引擎的微调配置。
 
-插件配置文件位于 `plugins/google_search_plugin/config.toml`，包含以下配置项：
+- `google.enabled` (bool): 是否启用Google。
+- `bing.enabled` (bool): 是否启用Bing。
+- `sogou.enabled` (bool): 是否启用搜狗。
+- ... 其他特定引擎的参数。
 
-### 基础配置
+## 使用说明
 
-```toml
-[search]
-# 默认搜索引擎 (google/bing/sogou)
-default_engine = "google"
-# 默认返回结果数量
-max_results = 5
-# 搜索超时时间（秒）
-timeout = 30
-# 失败重试次数
-retry_count = 2
-# 重试延迟（秒）
-retry_delay = 1.0
-```
+当你向麦麦提出需要外部知识或最新信息的问题时，它会自动被触发。
 
-### 搜索引擎配置
+### 场景
 
-```toml
-[engines.google]
-# 是否启用Google搜索
-enabled = true
-# Google搜索间隔（秒），避免429错误
-pause_time = 5.0
-# 搜索语言
-language = "zh-cn"
-# 搜索国家/地区
-country = "cn"
+你可以像和朋友聊天一样，直接提出你的问题。
 
-[engines.bing]
-# 是否启用Bing搜索
-enabled = true
-# Bing市场区域
-market = "zh-CN"
-# 搜索语言
-language = "zh-CN"
+**例如：**
+> "能搜一下最近很火的《Ave Mujica》吗？"
 
-[engines.sogou]
-# 是否启用搜狗搜索
-enabled = true
-# 搜索类型 (web/news)
-type = "web"
-```
+麦麦会自动调用本插件，搜索相关信息，并给你一个总结好的答案。
 
-### 高级配置
+### 总结
+你只需要自然地与麦麦对话，当她认为需要“上网查一下”的时候，这个插件就会被激活
 
-```toml
-[advanced]
-# User-Agent列表
-user_agents = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
-]
-# 是否抓取网页内容
-fetch_content = true
-# 内容抓取超时（秒）
-content_timeout = 10
-# 最大内容长度
-max_content_length = 5000
-```
 
-## 依赖安装
+---
 
-在插件目录下使用 requirements.txt 安装所有依赖：
+## 📦 依赖安装
+
+为了确保插件正常工作，您需要安装Python依赖。根目录执行以下命令即可：
 
 ```bash
 pip install -r requirements.txt
+
 ```
-
-## 注意事项
-
-- Google 搜索有频率限制，建议将 `pause_time` 设置为 5 秒或更长
-- 可以通过禁用某些搜索引擎来加快搜索速度
-- 如果某个搜索引擎经常失败，可以通过配置文件禁用它
-- 搜索结果会自动格式化，包含标题、链接和摘要
-- 插件会自动处理搜索失败的情况，并尝试备用搜索引擎
-
-
-
