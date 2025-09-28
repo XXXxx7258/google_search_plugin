@@ -33,20 +33,11 @@ from .tools.abbreviation_tool import AbbreviationTool
 
 logger = get_logger("google_search")
 
-# User-Agent 池
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-]
-
-
 class WebSearchTool(BaseTool):
     """Web 搜索工具"""
     
     name = "web_search"
-    description = "智能网络搜索工具。当需要回答关于时事、特定知识、人物、概念或任何当前信息的问题时，请使用此工具。它能理解对话上下文，自动搜索并总结信息，以提供一个全面、准确的回答。适用于处理需要外部世界知识才能解答的各种问题。"
+    description = "网络搜索工具。当需要回答关于时事、特定知识、人物、概念或任何当前信息的问题时，请使用此工具。它能理解对话上下文，自动搜索并总结信息，以提供一个全面、准确的回答。适用于处理需要外部世界知识才能解答的各种问题。"
     parameters = [
         ("question", ToolParamType.STRING, "需要搜索或解答的原始问题", True, None),
     ]
@@ -61,7 +52,7 @@ class WebSearchTool(BaseTool):
         config = self.plugin_config
         engines_config = config.get("engines", {})
         backend_config = config.get("search_backend", {})
-        
+
         # 将顶层配置注入到每个引擎
         common_config = {
             "timeout": backend_config.get("timeout", 20),
@@ -87,12 +78,12 @@ class WebSearchTool(BaseTool):
             return {"name": self.name, "content": "问题为空，无法执行搜索。"}
 
         try:
-            logger.info(f"开始执行模型驱动的智能搜索，原始问题: {question}")
+            logger.info(f"开始执行搜索，原始问题: {question}")
             result_content = await self._execute_model_driven_search(question)
             return {"name": self.name, "content": result_content}
         except Exception as e:
-            logger.error(f"模型驱动搜索执行异常: {e}", exc_info=True)
-            return {"name": self.name, "content": f"智能搜索失败: {str(e)}"}
+            logger.error(f"搜索执行异常: {e}", exc_info=True)
+            return {"name": self.name, "content": f"搜索失败: {str(e)}"}
 
     async def _execute_model_driven_search(self, question: str) -> str:
         """执行模型驱动的智能搜索流程"""
@@ -266,8 +257,11 @@ class WebSearchTool(BaseTool):
         max_length = self.backend_config.get("max_content_length", 3000)
         
         try:
-            # 随机选择 User-Agent
-            headers = {"User-Agent": random.choice(USER_AGENTS)}
+            # 从配置中获取 User-Agent 列表，如果不存在则使用一个默认值
+            user_agents = self.backend_config.get("user_agents", [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ])
+            headers = {"User-Agent": random.choice(user_agents)}
             
             async with session.get(url, timeout=timeout, headers=headers, proxy=self.plugin_config.get("proxy")) as response:
                 if response.status != 200:
@@ -388,6 +382,16 @@ class google_search_simple(BasePlugin):
             "fetch_content": ConfigField(type=bool, default=True, description="是否抓取网页内容"),
             "content_timeout": ConfigField(type=int, default=10, description="内容抓取超时（秒）"),
             "max_content_length": ConfigField(type=int, default=3000, description="最大内容长度"),
+            "user_agents": ConfigField(
+                type=list,
+                default=[
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+                ],
+                description="抓取网页时使用的 User-Agent 列表，会从中随机选择。"
+            ),
         },
         "engines": {
             "google": {
@@ -410,3 +414,93 @@ class google_search_simple(BasePlugin):
             (WebSearchTool.get_tool_info(), WebSearchTool),
             (AbbreviationTool.get_tool_info(), AbbreviationTool),
         ]
+
+    def _get_default_config_from_schema(self, schema_part: dict) -> dict:
+        """递归地从 schema 生成默认配置字典"""
+        config = {}
+        for key, value in schema_part.items():
+            if isinstance(value, ConfigField):
+                config[key] = value.default
+            elif isinstance(value, dict):
+                config[key] = self._get_default_config_from_schema(value)
+        return config
+
+    def _generate_toml_string(self, schema_part: dict, config_part: dict, indent: str = "") -> str:
+        """递归地生成带注释的 toml 字符串"""
+        import json
+        toml_str = ""
+        for key, schema_value in schema_part.items():
+            if isinstance(schema_value, ConfigField):
+                # 写字段注释和值
+                toml_str += f"\n{indent}# {schema_value.description}\n"
+                if schema_value.example:
+                    toml_str += f"{indent}# 示例: {schema_value.example}\n"
+                if schema_value.choices:
+                    toml_str += f"{indent}# 可选值: {', '.join(map(str, schema_value.choices))}\n"
+                
+                value = config_part.get(key, schema_value.default)
+                
+                # 使用 json.dumps 来安全地序列化值，特别是列表
+                if isinstance(value, str):
+                    toml_str += f'{indent}{key} = "{value}"\n'
+                elif isinstance(value, list):
+                    toml_str += f"{indent}{key} = {json.dumps(value, ensure_ascii=False)}\n"
+                else: # bool, int, float
+                    toml_str += f"{indent}{key} = {json.dumps(value)}\n"
+
+            elif isinstance(schema_value, dict):
+                # 写子节
+                toml_str += f"\n{indent}[{key}]\n"
+                toml_str += self._generate_toml_string(schema_value, config_part.get(key, {}), indent)
+        return toml_str
+
+    def _load_plugin_config(self):
+        """覆盖基类的配置加载方法，以正确处理嵌套配置。"""
+        import toml
+
+        if not self.config_file_name:
+            logger.debug(f"{self.log_prefix} 未指定配置文件，跳过加载")
+            return
+
+        if not self.plugin_dir or not os.path.isdir(self.plugin_dir):
+            logger.error(f"{self.log_prefix} 插件目录路径无效或未提供，配置加载失败。")
+            self.config = self._get_default_config_from_schema(self.config_schema)
+            return
+
+        config_file_path = os.path.join(self.plugin_dir, self.config_file_name)
+        default_config = self._get_default_config_from_schema(self.config_schema)
+
+        # 如果文件不存在，则创建
+        if not os.path.exists(config_file_path):
+            logger.info(f"{self.log_prefix} 配置文件不存在，将生成完整的默认配置。")
+            full_toml_str = f"# {self.plugin_name} - 自动生成的配置文件\n"
+            full_toml_str += f"# {self.get_manifest_info('description', '插件配置文件')}\n"
+            
+            for section, schema_fields in self.config_schema.items():
+                full_toml_str += f"\n[{section}]\n"
+                full_toml_str += self._generate_toml_string(schema_fields, default_config.get(section, {}))
+            
+            try:
+                with open(config_file_path, "w", encoding="utf-8") as f:
+                    f.write(full_toml_str)
+                logger.info(f"{self.log_prefix} 已生成默认配置文件: {config_file_path}")
+                self.config = default_config
+            except IOError as e:
+                logger.error(f"{self.log_prefix} 保存默认配置文件失败: {e}", exc_info=True)
+                self.config = default_config # 即使保存失败，也使用默认配置运行
+            
+            return # 结束
+
+        # 如果文件存在，则加载
+        try:
+            with open(config_file_path, "r", encoding="utf-8") as f:
+                self.config = toml.load(f)
+            logger.debug(f"{self.log_prefix} 配置已从 {config_file_path} 加载")
+        except Exception as e:
+            logger.error(f"{self.log_prefix} 加载配置文件失败: {e}，将使用默认配置。")
+            self.config = default_config
+
+        # 从配置中更新 enable_plugin 状态
+        if "plugin" in self.config and "enabled" in self.config["plugin"]:
+            self.enable_plugin = self.config["plugin"]["enabled"]
+            logger.debug(f"{self.log_prefix} 从配置更新插件启用状态: {self.enable_plugin}")
