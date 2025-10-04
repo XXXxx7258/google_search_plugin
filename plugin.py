@@ -27,6 +27,7 @@ from .search_engines.base import SearchResult
 from .search_engines.google import GoogleEngine
 from .search_engines.bing import BingEngine
 from .search_engines.sogou import SogouEngine
+from .search_engines.duckduckgo import DuckDuckGoEngine
 
 # 导入翻译工具
 from .tools.abbreviation_tool import AbbreviationTool
@@ -37,9 +38,9 @@ class WebSearchTool(BaseTool):
     """Web 搜索工具"""
     
     name = "web_search"
-    description = "网络搜索工具。当需要回答关于时事、特定知识、人物、概念或任何当前信息的问题时，请使用此工具。它能理解对话上下文，自动搜索并总结信息，以提供一个全面、准确的回答。适用于处理需要外部世界知识才能解答的各种问题。"
+    description = "谷歌搜索工具。当见到有人发出疑问或者遇到不熟悉的事情时候，直接使用它获得最新知识！"
     parameters = [
-        ("question", ToolParamType.STRING, "需要搜索或解答的原始问题", True, None),
+        ("question", ToolParamType.STRING, "需要搜索的消息", True, None),
     ]
     available_for_llm = True
 
@@ -62,10 +63,12 @@ class WebSearchTool(BaseTool):
         google_config = {**engines_config.get("google", {}), **common_config}
         bing_config = {**engines_config.get("bing", {}), **common_config}
         sogou_config = {**engines_config.get("sogou", {}), **common_config}
+        duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
 
         self.google = GoogleEngine(google_config)
         self.bing = BingEngine(bing_config)
         self.sogo = SogouEngine(sogou_config)
+        self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
         
         # 存储配置供后续使用
         self.model_config = config.get("model_config", {})
@@ -228,16 +231,22 @@ class WebSearchTool(BaseTool):
         # 定义搜索引擎顺序
         engine_order = []
         if default_engine == "google":
-            engine_order = [("google", self.google), ("bing", self.bing), ("sogou", self.sogo)]
+            engine_order = [("google", self.google), ("bing", self.bing), ("duckduckgo", self.duckduckgo), ("sogou", self.sogo)]
         elif default_engine == "bing":
-            engine_order = [("bing", self.bing), ("google", self.google), ("sogou", self.sogo)]
+            engine_order = [("bing", self.bing), ("google", self.google), ("duckduckgo", self.duckduckgo), ("sogou", self.sogo)]
         elif default_engine == "sogou":
-            engine_order = [("sogou", self.sogo), ("google", self.google), ("bing", self.bing)]
+            engine_order = [("sogou", self.sogo), ("google", self.google), ("bing", self.bing), ("duckduckgo", self.duckduckgo)]
+        elif default_engine == "duckduckgo":
+            engine_order = [("duckduckgo", self.duckduckgo), ("google", self.google), ("bing", self.bing), ("sogou", self.sogo)]
         
         # 按顺序尝试搜索引擎
         for engine_name, engine in engine_order:
             # 检查引擎是否启用
-            if not engines_config.get(engine_name, {}).get("enabled", True):
+            # BUGFIX: The config is loaded with a flat structure for engines, not nested.
+            # We need to get the engine's config from the top-level plugin_config,
+            # not from the (empty) engines_config dictionary.
+            engine_specific_config = self.plugin_config.get(engine_name, {})
+            if not engine_specific_config.get("enabled", True):
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
                 continue
                 
@@ -359,6 +368,7 @@ class google_search_simple(BasePlugin):
         "lxml>=4.9.0",
         "readability-lxml>=0.8.1",
         "googlesearch-python>=1.2.3",
+        "ddgs",
     ]
     config_file_name: str = "config.toml"
     
@@ -375,7 +385,7 @@ class google_search_simple(BasePlugin):
             "context_max_limit": ConfigField(type=int, default=15, description="最多获取多少条全局聊天记录作为上下文。"),
         },
         "search_backend": {
-            "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou)"),
+            "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou/duckduckgo)"),
             "max_results": ConfigField(type=int, default=5, description="默认返回结果数量"),
             "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
             "proxy": ConfigField(type=str, default="", description="用于搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。如果留空则不使用代理。"),
@@ -404,6 +414,11 @@ class google_search_simple(BasePlugin):
             },
             "sogou": {
                 "enabled": ConfigField(type=bool, default=True, description="是否启用搜狗搜索"),
+            },
+            "duckduckgo": {
+                "enabled": ConfigField(type=bool, default=True, description="是否启用DDGS元搜索引擎"),
+                "region": ConfigField(type=str, default="wt-wt", description="搜索区域代码, 例如 'us-en', 'cn-zh' 等"),
+                "backend": ConfigField(type=str, default="auto", description="使用的后端。'auto'表示自动选择，也可以指定多个，如 'duckduckgo,google,brave'"),
             },
         }
     }
