@@ -2,6 +2,7 @@ import os
 import asyncio
 import random
 import time
+import base64
 from typing import List, Tuple, Type, Dict, Any, Optional
 from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from src.plugin_system import (
     BasePlugin,
     register_plugin,
     BaseTool,
+    BaseAction,
+    ActionActivationType,
     ComponentInfo,
     ConfigField,
     ToolParamType,
@@ -355,6 +358,104 @@ class WebSearchTool(BaseTool):
         return "\n".join(lines).strip()
 
 
+class ImageSearchAction(BaseAction):
+    """图片搜索动作"""
+    
+    action_name = "image_search"
+    action_description = "当用户明确需要搜索图片时使用此动作。例如：'搜索一下猫的图片'、'来张风景图'。"
+    
+    # 激活类型：让LLM来判断是否需要搜索图片
+    activation_type = ActionActivationType.LLM_JUDGE
+    
+    # 关联类型：这个Action会发送图片
+    associated_types = ["image"]
+    
+    # LLM决策所需参数
+    action_parameters = {
+        "query": "需要搜索的图片关键词"
+    }
+    
+    # LLM决策使用场景
+    action_require = [
+        "当用户明确表示想看、想搜索或想要一张图片时使用。",
+        "适用于'搜/找/来一张/发一张xx的图片'等指令。",
+        "如果用户只是在普通聊天中提到了某个事物，不代表他想要图片，此时不应使用。",
+        "一次只发送一张最相关的图片。"
+    ]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # 复用 WebSearchTool 的引擎初始化逻辑
+        config = self.plugin_config
+        engines_config = config.get("engines", {})
+        backend_config = config.get("search_backend", {})
+        common_config = {
+            "timeout": backend_config.get("timeout", 20),
+            "proxy": backend_config.get("proxy")
+        }
+        duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
+        self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
+        self.backend_config = config.get("search_backend", {})
+
+    async def execute(self) -> Tuple[bool, str]:
+        """执行图片搜索并直接发送图片"""
+        query = self.action_data.get("query", "").strip()
+        if not query:
+            await self.send_text("你想搜什么图片呀？", set_reply=True, reply_message=self.action_message)
+            return False, "关键词为空"
+
+        try:
+            logger.info(f"开始执行图片搜索动作，关键词: {query}")
+            num_results = self.backend_config.get("max_results", 5) # 搜索5个结果以提高成功率
+            
+            image_results = await self.duckduckgo.search_images(query, num_results)
+            
+            if not image_results:
+                await self.send_text(f"我没找到关于「{query}」的图片呢。", set_reply=True, reply_message=self.action_message)
+                return False, "未找到图片"
+
+            image_urls = [item.get('image') for item in image_results if item.get('image')]
+            if not image_urls:
+                await self.send_text("虽然找到了结果，但好像没有有效的图片地址。", set_reply=True, reply_message=self.action_message)
+                return False, "无有效图片地址"
+
+            async def _fetch_image(session, url):
+                try:
+                    async with session.get(url, timeout=10) as response:
+                        if response.status == 200:
+                            return await response.read()
+                except Exception as e:
+                    logger.warning(f"下载图片失败: {url}, 错误: {e}")
+                return None
+
+            # 尝试下载并发送第一张成功的图片
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                for url in image_urls:
+                    image_data = await _fetch_image(session, url)
+                    if image_data:
+                        # 编码为base64
+                        b64_data = base64.b64encode(image_data).decode('utf-8')
+                        # 发送图片
+                        success = await self.send_image(b64_data, set_reply=True, reply_message=self.action_message)
+                        if success:
+                            logger.info(f"成功发送了关于「{query}」的图片。")
+                            return True, "图片发送成功"
+                        else:
+                            logger.error("调用 send_image 失败。")
+                            # 即使发送失败也停止，避免发送多张
+                            await self.send_text("我下载好了图片，但是发送失败了...", set_reply=True, reply_message=self.action_message)
+                            return False, "发送图片API失败"
+            
+            # 如果循环结束都没有成功下载和发送
+            await self.send_text("找到了图片，但下载都失败了，可能是网络问题。", set_reply=True, reply_message=self.action_message)
+            return False, "所有图片下载失败"
+
+        except Exception as e:
+            logger.error(f"图片搜索动作过程中出现异常: {e}", exc_info=True)
+            await self.send_text(f"搜索图片时出错了：{str(e)}", set_reply=True, reply_message=self.action_message)
+            return False, f"图片搜索失败: {str(e)}"
+
+
 @register_plugin
 class google_search_simple(BasePlugin):
     """Google Search 插件"""
@@ -419,6 +520,8 @@ class google_search_simple(BasePlugin):
                 "enabled": ConfigField(type=bool, default=True, description="是否启用DDGS元搜索引擎"),
                 "region": ConfigField(type=str, default="wt-wt", description="搜索区域代码, 例如 'us-en', 'cn-zh' 等"),
                 "backend": ConfigField(type=str, default="auto", description="使用的后端。'auto'表示自动选择，也可以指定多个，如 'duckduckgo,google,brave'"),
+                "safesearch": ConfigField(type=str, default="moderate", choices=["on", "moderate", "off"], description="安全搜索级别"),
+                "timelimit": ConfigField(type=str, default="", description="时间限制 (d, w, m, y)"),
             },
         }
     }
@@ -427,6 +530,7 @@ class google_search_simple(BasePlugin):
         """获取插件提供的组件"""
         return [
             (WebSearchTool.get_tool_info(), WebSearchTool),
+            (ImageSearchAction.get_action_info(), ImageSearchAction),
             (AbbreviationTool.get_tool_info(), AbbreviationTool),
         ]
 
