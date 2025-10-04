@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
-  "name": "Google 搜索以及缩写翻译插件 (Google Search and Abbreviation Translation Plugin)",
+  "name": "Google 搜索以及缩写翻译以及图片搜索插件 (Google Search and Abbreviation Translation Plugin and。。。)",
   "version": "1.0.0",
-  "description": "支持多个搜索引擎的网络搜索以及聚合翻译搜索插件，具有自动降级功能。",
+  "description": "支持多个搜索引擎的网络搜索以及聚合翻译搜索以及图片搜索插件，具有自动降级功能。",
   "author": {
     "name": "晴空",
     "url": "https://github.com/XXXxx7258"
@@ -14,8 +14,8 @@
   },
   "homepage_url": "https://github.com/XXXxx7258/google_search_plugin",
   "repository_url": "https://github.com/XXXxx7258/google_search_plugin",
-  "keywords": ["google", "search", "web", "internet", "查询", "搜索", "多引擎", "翻译", "缩写", "nbnhhsh"],
-  "categories": ["Search", "Utilities", "Translation"],
+  "keywords": ["google", "search", "web", "internet", "图片", "查询", "搜索", "多引擎", "翻译", "缩写", "nbnhhsh"],
+  "categories": ["Search", "Utilities", "Translation" ,"image"],
 
   "default_locale": "zh-CN",
   "locales_path": "_locales",
@@ -48,4 +48,5 @@
   }
 
 }
+
 
