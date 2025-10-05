@@ -25,7 +25,7 @@ pip install -r requirements.txt
 
 ## 🔧 配置说明
 
-插件的配置在 `config/plugins/google_search_plugin.toml` 文件中。
+插件的配置在 `plugins/google_search_plugin/config.toml` 文件中(在第一次启动后会自动生成)。
 
 此插件默认使用系统配置的主模型进行智能搜索，但你也可以通过以下配置项进行微调。
 
@@ -75,6 +75,7 @@ pip install -r requirements.txt
 
 
 ---
+
 
 
 
