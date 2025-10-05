@@ -5,28 +5,32 @@ import logging
 try:
     # 导入新库
     from ddgs import DDGS
+    from ddgs.exceptions import DDGSException, TimeoutException
     HAS_DDGS = True
 except ImportError:
     HAS_DDGS = False
+    DDGSException = Exception
+    TimeoutException = Exception
 
 from .base import BaseSearchEngine, SearchResult
 
 logger = logging.getLogger(__name__)
 
-def sync_ddgs_search(query: str, num_results: int, region: str, backend: str, safesearch: str, timelimit: Optional[str]) -> List[Dict[str, str]]:
+def sync_ddgs_search(query: str, search_params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     在一个同步函数中执行 DDGS 文本搜索，以便在线程池中运行。
     """
-    with DDGS() as ddgs:
-        # text 方法是同步的，它在内部处理并发和后端选择
-        return ddgs.text(query, region=region, safesearch=safesearch, timelimit=timelimit, max_results=num_results, backend=backend)
+    timeout = search_params.pop('timeout', 10)
+    with DDGS(timeout=timeout) as ddgs:
+        return ddgs.text(query, **search_params)
 
-def sync_ddgs_images_search(query: str, num_results: int, region: str, safesearch: str, timelimit: Optional[str]) -> List[Dict[str, str]]:
+def sync_ddgs_images_search(query: str, search_params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     在一个同步函数中执行 DDGS 图片搜索，以便在线程池中运行。
     """
-    with DDGS() as ddgs:
-        return ddgs.images(query, region=region, safesearch=safesearch, timelimit=timelimit, max_results=num_results)
+    timeout = search_params.pop('timeout', 10)
+    with DDGS(timeout=timeout) as ddgs:
+        return ddgs.images(query, **search_params)
 
 class DuckDuckGoEngine(BaseSearchEngine):
     """
@@ -38,25 +42,38 @@ class DuckDuckGoEngine(BaseSearchEngine):
         super().__init__(config)
         if not HAS_DDGS:
             raise ImportError("没有 ddgs 库。请确保它已在插件依赖中声明。")
-        self.region = self.config.get("region", "wt-wt")
-        self.backend = self.config.get("backend", "auto")
-        self.safesearch = self.config.get("safesearch", "moderate")
-        self.timelimit = self.config.get("timelimit") # 默认为 None
+        
+        # 优化默认配置以提高搜索成功率
+        self.region = self.config.get("region", "wt-wt")  # 全球搜索
+        self.backend = self.config.get("backend", "auto")  # 自动选择最佳后端
+        self.safesearch = self.config.get("safesearch", "moderate")  # 适中的安全搜索
+        self.timelimit = self.config.get("timelimit")  # 时间限制，默认为 None
+        
+        logger.info(f"DuckDuckGo 引擎初始化完成 - region: {self.region}, backend: {self.backend}, safesearch: {self.safesearch}")
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
         """通过在线程池中运行同步的 ddgs.text 方法来进行搜索"""
         try:
             loop = asyncio.get_event_loop()
             
+            # 构建搜索参数
+            search_params = {
+                'max_results': num_results,
+                'region': self.region,
+                'backend': self.backend,
+                'safesearch': self.safesearch,
+                'timeout': self.config.get('timeout', 10)
+            }
+            
+            # 只有当 timelimit 不为空时才添加
+            if self.timelimit:
+                search_params['timelimit'] = self.timelimit
+            
             search_results = await loop.run_in_executor(
                 None,
                 sync_ddgs_search,
                 query,
-                num_results,
-                self.region,
-                self.backend,
-                self.safesearch,
-                self.timelimit
+                search_params
             )
             
             results = []
@@ -70,8 +87,17 @@ class DuckDuckGoEngine(BaseSearchEngine):
                 ))
             return results
             
+        except DDGSException as e:
+            if "No results found" in str(e):
+                logger.info(f"ddgs 文本搜索未找到结果: {query}")
+            else:
+                logger.error(f"ddgs 文本搜索错误: {e}")
+            return []
+        except TimeoutException as e:
+            logger.warning(f"ddgs 文本搜索超时: {query} - {e}")
+            return []
         except Exception as e:
-            logger.error(f"ddgs 库搜索失败: {e}", exc_info=True)
+            logger.error(f"ddgs 文本搜索意外错误: {query} - {e}", exc_info=True)
             return []
 
     async def search_images(self, query: str, num_results: int) -> List[Dict[str, str]]:
@@ -79,17 +105,35 @@ class DuckDuckGoEngine(BaseSearchEngine):
         try:
             loop = asyncio.get_event_loop()
             
+            # 构建图片搜索参数
+            search_params = {
+                'max_results': num_results,
+                'region': self.region,
+                'safesearch': self.safesearch,
+                'timeout': self.config.get('timeout', 10)
+            }
+            
+            # 只有当 timelimit 不为空时才添加
+            if self.timelimit:
+                search_params['timelimit'] = self.timelimit
+            
             search_results = await loop.run_in_executor(
                 None,
                 sync_ddgs_images_search,
                 query,
-                num_results,
-                self.region,
-                self.safesearch,
-                self.timelimit
+                search_params
             )
             return search_results
             
+        except DDGSException as e:
+            if "No results found" in str(e):
+                logger.info(f"ddgs 图片搜索未找到结果: {query}")
+            else:
+                logger.error(f"ddgs 图片搜索错误: {e}")
+            return []
+        except TimeoutException as e:
+            logger.warning(f"ddgs 图片搜索超时: {query} - {e}")
+            return []
         except Exception as e:
-            logger.error(f"ddgs 库图片搜索失败: {e}", exc_info=True)
+            logger.error(f"ddgs 图片搜索意外错误: {query} - {e}", exc_info=True)
             return []
