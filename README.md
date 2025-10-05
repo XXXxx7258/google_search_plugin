@@ -1,6 +1,8 @@
 # Search 插件
 
-这是一个搜索插件，还有缩写翻译，还有图片搜索
+这是一个搜索插件，还有缩写翻译，还有图片搜索（**使用此插件需要在bot_config中开启工具调用**）
+<img width="735" height="308" alt="image" src="https://github.com/user-attachments/assets/9bc86124-b3a8-43e0-addb-1884133658c2" />
+
 
 ## 工作流程
 
@@ -74,6 +76,7 @@
 pip install -r requirements.txt
 
 ```
+
 
 
 
