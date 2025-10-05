@@ -3,6 +3,16 @@
 这是一个搜索插件，还有缩写翻译，还有图片搜索（**使用此插件需要在bot_config中开启工具调用**）
 <img width="735" height="308" alt="image" src="https://github.com/user-attachments/assets/9bc86124-b3a8-43e0-addb-1884133658c2" />
 
+## 📦 依赖安装
+
+注意：**一键包**用户在“点我启动！！！.bat”后选择"11. 交互式安装pip模块",在其中输入requirements.txt的路径即可！（如："E:\Downloads\MaiBotOneKey\modules\MaiBot\plugins\google_search_plugin\requirements.txt"）
+
+为了确保插件正常工作，您需要安装Python依赖。**在你的麦麦的运行环境**中于**本插件**的根目录下执行以下命令即可：
+
+```bash
+pip install -r requirements.txt
+
+```
 
 ## 工作流程
 
@@ -66,16 +76,6 @@
 
 ---
 
-## 📦 依赖安装
-
-注意：**一键包**用户在“点我启动！！！.bat”后选择"11. 交互式安装pip模块",在其中输入requirements.txt的路径即可！（如："E:\Downloads\MaiBotOneKey\modules\MaiBot\plugins\google_search_plugin\requirements.txt"）
-
-为了确保插件正常工作，您需要安装Python依赖。**在你的麦麦的运行环境**中于**本插件**的根目录下执行以下命令即可：
-
-```bash
-pip install -r requirements.txt
-
-```
 
 
 
