@@ -245,10 +245,8 @@ class WebSearchTool(BaseTool):
         # 按顺序尝试搜索引擎
         for engine_name, engine in engine_order:
             # 检查引擎是否启用
-            # BUGFIX: The config is loaded with a flat structure for engines, not nested.
-            # We need to get the engine's config from the top-level plugin_config,
-            # not from the (empty) engines_config dictionary.
-            engine_specific_config = self.plugin_config.get(engine_name, {})
+            # 从 engines 配置节点下读取引擎配置
+            engine_specific_config = self.plugin_config.get("engines", {}).get(engine_name, {})
             if not engine_specific_config.get("enabled", True):
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
                 continue
@@ -385,7 +383,15 @@ class ImageSearchAction(BaseAction):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # 复用 WebSearchTool 的引擎初始化逻辑
+        
+        # 检查是否启用图片搜索功能
+        self.enabled = self.get_config("actions.image_search.enabled", False)
+        
+        if not self.enabled:
+            logger.info("图片搜索功能已在配置中禁用")
+            return
+        
+        # 仅在启用时初始化引擎
         config = self.plugin_config
         engines_config = config.get("engines", {})
         backend_config = config.get("search_backend", {})
@@ -399,6 +405,15 @@ class ImageSearchAction(BaseAction):
 
     async def execute(self) -> Tuple[bool, str]:
         """执行图片搜索并直接发送图片"""
+        # 检查是否启用
+        if not getattr(self, 'enabled', False):
+            await self.send_text(
+                "图片搜索功能当前未启用。如需使用，请在配置文件中启用此功能（注意：需要科学上网工具）。",
+                set_reply=True,
+                reply_message=self.action_message
+            )
+            return False, "图片搜索功能未启用"
+        
         query = self.action_data.get("query", "").strip()
         if not query:
             await self.send_text("你想搜什么图片呀？", set_reply=True, reply_message=self.action_message)
@@ -485,6 +500,11 @@ class google_search_simple(BasePlugin):
             "context_time_gap": ConfigField(type=int, default=300, description="获取最近多少秒的全局聊天记录作为上下文。"),
             "context_max_limit": ConfigField(type=int, default=15, description="最多获取多少条全局聊天记录作为上下文。"),
         },
+        "actions": {
+            "image_search": {
+                "enabled": ConfigField(type=bool, default=False, description="是否启用图片搜索功能。注意：图片搜索需要科学上网工具才能正常使用。"),
+            },
+        },
         "search_backend": {
             "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou/duckduckgo)"),
             "max_results": ConfigField(type=int, default=5, description="默认返回结果数量"),
@@ -528,11 +548,19 @@ class google_search_simple(BasePlugin):
     
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         """获取插件提供的组件"""
-        return [
+        components = [
             (WebSearchTool.get_tool_info(), WebSearchTool),
-            (ImageSearchAction.get_action_info(), ImageSearchAction),
             (AbbreviationTool.get_tool_info(), AbbreviationTool),
         ]
+        
+        # 仅在配置启用时注册图片搜索动作
+        if self.config.get("actions", {}).get("image_search", {}).get("enabled", False):
+            components.append((ImageSearchAction.get_action_info(), ImageSearchAction))
+            logger.info(f"{self.log_prefix} 图片搜索功能已启用并注册")
+        else:
+            logger.info(f"{self.log_prefix} 图片搜索功能未启用，跳过注册")
+        
+        return components
 
     def _get_default_config_from_schema(self, schema_part: dict) -> dict:
         """递归地从 schema 生成默认配置字典"""
@@ -544,33 +572,43 @@ class google_search_simple(BasePlugin):
                 config[key] = self._get_default_config_from_schema(value)
         return config
 
-    def _generate_toml_string(self, schema_part: dict, config_part: dict, indent: str = "") -> str:
-        """递归地生成带注释的 toml 字符串"""
+    def _generate_toml_string(self, schema_part: dict, config_part: dict, indent: str = "", parent_path: str = "") -> str:
+        """递归地生成带注释的 toml 字符串
+        
+        Args:
+            schema_part: 配置 schema 的一部分
+            config_part: 配置值的一部分
+            indent: 缩进字符串（已废弃，保留用于兼容性）
+            parent_path: 父级路径，用于生成正确的 TOML 节点路径
+        """
         import json
         toml_str = ""
         for key, schema_value in schema_part.items():
             if isinstance(schema_value, ConfigField):
                 # 写字段注释和值
-                toml_str += f"\n{indent}# {schema_value.description}\n"
+                toml_str += f"\n# {schema_value.description}\n"
                 if schema_value.example:
-                    toml_str += f"{indent}# 示例: {schema_value.example}\n"
+                    toml_str += f"# 示例: {schema_value.example}\n"
                 if schema_value.choices:
-                    toml_str += f"{indent}# 可选值: {', '.join(map(str, schema_value.choices))}\n"
+                    toml_str += f"# 可选值: {', '.join(map(str, schema_value.choices))}\n"
                 
                 value = config_part.get(key, schema_value.default)
                 
                 # 使用 json.dumps 来安全地序列化值，特别是列表
                 if isinstance(value, str):
-                    toml_str += f'{indent}{key} = "{value}"\n'
+                    toml_str += f'{key} = "{value}"\n'
                 elif isinstance(value, list):
-                    toml_str += f"{indent}{key} = {json.dumps(value, ensure_ascii=False)}\n"
+                    toml_str += f"{key} = {json.dumps(value, ensure_ascii=False)}\n"
                 else: # bool, int, float
-                    toml_str += f"{indent}{key} = {json.dumps(value)}\n"
+                    toml_str += f"{key} = {json.dumps(value)}\n"
 
             elif isinstance(schema_value, dict):
-                # 写子节
-                toml_str += f"\n{indent}[{key}]\n"
-                toml_str += self._generate_toml_string(schema_value, config_part.get(key, {}), indent)
+                # 构建完整的节点路径
+                current_path = f"{parent_path}.{key}" if parent_path else key
+                # 写子节（使用完整路径）
+                toml_str += f"\n[{current_path}]\n"
+                # 递归生成子节点内容，传递当前路径作为新的父路径
+                toml_str += self._generate_toml_string(schema_value, config_part.get(key, {}), indent, current_path)
         return toml_str
 
     def _load_plugin_config(self):
@@ -597,7 +635,7 @@ class google_search_simple(BasePlugin):
             
             for section, schema_fields in self.config_schema.items():
                 full_toml_str += f"\n[{section}]\n"
-                full_toml_str += self._generate_toml_string(schema_fields, default_config.get(section, {}))
+                full_toml_str += self._generate_toml_string(schema_fields, default_config.get(section, {}), "", section)
             
             try:
                 with open(config_file_path, "w", encoding="utf-8") as f:
