@@ -17,28 +17,45 @@ from .base import BaseSearchEngine, SearchResult
 logger = logging.getLogger(__name__)
 
 def sync_ddgs_search(query: str, search_params: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    在一个同步函数中执行 DDGS 文本搜索，以便在线程池中运行。
+    """在一个同步函数中执行 DDGS 文本搜索，以便在线程池中运行
+    
+    Args:
+        query: 搜索查询
+        search_params: 搜索参数字典
+        
+    Returns:
+        搜索结果字典列表
     """
     timeout = search_params.pop('timeout', 10)
     with DDGS(timeout=timeout) as ddgs:
         return ddgs.text(query, **search_params)
 
 def sync_ddgs_images_search(query: str, search_params: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    在一个同步函数中执行 DDGS 图片搜索，以便在线程池中运行。
+    """在一个同步函数中执行 DDGS 图片搜索，以便在线程池中运行
+    
+    Args:
+        query: 搜索查询
+        search_params: 搜索参数字典
+        
+    Returns:
+        图片结果字典列表
     """
     timeout = search_params.pop('timeout', 10)
     with DDGS(timeout=timeout) as ddgs:
         return ddgs.images(query, **search_params)
 
 class DuckDuckGoEngine(BaseSearchEngine):
-    """
-    使用新版 ddgs 库的搜索引擎实现。
+    """使用新版 ddgs 库的搜索引擎实现
+    
     这个库现在是一个元搜索引擎，可以调用多个后端。
     """
+    
+    region: str
+    backend: str
+    safesearch: str
+    timelimit: Optional[str]
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         if not HAS_DDGS:
             raise ImportError("没有 ddgs 库。请确保它已在插件依赖中声明。")
@@ -52,7 +69,15 @@ class DuckDuckGoEngine(BaseSearchEngine):
         logger.info(f"DuckDuckGo 引擎初始化完成 - region: {self.region}, backend: {self.backend}, safesearch: {self.safesearch}")
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
-        """通过在线程池中运行同步的 ddgs.text 方法来进行搜索"""
+        """通过在线程池中运行同步的 ddgs.text 方法来进行搜索
+        
+        Args:
+            query: 搜索查询
+            num_results: 期望的结果数量
+            
+        Returns:
+            搜索结果列表
+        """
         try:
             loop = asyncio.get_event_loop()
             
@@ -101,7 +126,15 @@ class DuckDuckGoEngine(BaseSearchEngine):
             return []
 
     async def search_images(self, query: str, num_results: int) -> List[Dict[str, str]]:
-        """通过在线程池中运行同步的 ddgs.images 方法来进行图片搜索"""
+        """通过在线程池中运行同步的 ddgs.images 方法来进行图片搜索
+        
+        Args:
+            query: 搜索查询
+            num_results: 期望的结果数量
+            
+        Returns:
+            图片信息字典列表
+        """
         try:
             loop = asyncio.get_event_loop()
             
