@@ -33,7 +33,15 @@ class SearchResult:
     content: str = ""
 
 class BaseSearchEngine:
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    """搜索引擎基类"""
+    
+    config: Dict[str, Any]
+    TIMEOUT: int
+    max_results: int
+    headers: Dict[str, str]
+    proxy: Optional[str]
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self.config = config or {}
         self.TIMEOUT = self.config.get("timeout", 10)
         self.max_results = self.config.get("max_results", 10)
@@ -41,12 +49,37 @@ class BaseSearchEngine:
         self.proxy = self.config.get("proxy")
 
     def _set_selector(self, selector: str) -> str:
+        """获取页面元素选择器
+        
+        Args:
+            selector: 选择器名称
+            
+        Returns:
+            CSS选择器字符串
+        """
         raise NotImplementedError()
 
     async def _get_next_page(self, query: str) -> str:
+        """获取搜索页面HTML
+        
+        Args:
+            query: 搜索查询
+            
+        Returns:
+            HTML内容
+        """
         raise NotImplementedError()
 
-    async def _get_html(self, url: str, data: Optional[dict] = None) -> str:
+    async def _get_html(self, url: str, data: Optional[Dict[str, Any]] = None) -> str:
+        """获取HTML内容
+        
+        Args:
+            url: 目标URL
+            data: POST数据（可选）
+            
+        Returns:
+            HTML字符串
+        """
         headers = self.headers
         headers["Referer"] = url
         headers["User-Agent"] = random.choice(USER_AGENTS)
@@ -65,9 +98,26 @@ class BaseSearchEngine:
                     return await resp.text()
 
     def tidy_text(self, text: str) -> str:
+        """清理文本
+        
+        Args:
+            text: 原始文本
+            
+        Returns:
+            清理后的文本
+        """
         return text.strip().replace("\n", " ").replace("\r", " ").replace("  ", " ")
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
+        """执行搜索
+        
+        Args:
+            query: 搜索查询
+            num_results: 期望的结果数量
+            
+        Returns:
+            搜索结果列表
+        """
         try:
             resp = await self._get_next_page(query)
             soup = BeautifulSoup(resp, "html.parser")
