@@ -4,7 +4,7 @@
 提供中文网络缩写词汇翻译功能
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple, Optional
 from src.common.logger import get_logger
 from src.plugin_system import BaseTool, ToolParamType
 from ..translators.nbnhhsh import NbnhhshTranslator
@@ -15,25 +15,34 @@ logger = get_logger("abbreviation_tool")
 class AbbreviationTool(BaseTool):
     """网络用语翻译工具"""
     
-    name = "abbreviation_translate"
-    description = "当遇到用户消息中出现难懂的网络用语、缩写、黑话、热词或流行语时，主动查询并翻译这些词汇以帮助理解。适用于各种类型的网络语言，包括字母缩写（如yyds、u1s1）、网络黑话、当下热词、流行语等。应该识别消息中可能让人困惑的网络用语并自动查询其含义。"
-    parameters = [
+    name: str = "abbreviation_translate"
+    description: str = "当遇到用户消息中出现难懂的网络用语、缩写、黑话、热词或流行语时，主动查询并翻译这些词汇以帮助理解。适用于各种类型的网络语言，包括字母缩写（如yyds、u1s1）、网络黑话、当下热词、流行语等。应该识别消息中可能让人困惑的网络用语并自动查询其含义。"
+    parameters: List[Tuple[str, ToolParamType, str, bool, None]] = [
         ("term", ToolParamType.STRING, "从用户消息中识别出的网络用语、缩写或热词（如：yyds、躺平、内卷等）", True, None),
         ("max_results", ToolParamType.INTEGER, "返回翻译结果数量，默认为3", False, None),
     ]
-    available_for_llm = True
+    available_for_llm: bool = True
     
-    def __init__(self, *args, **kwargs):
+    translator: NbnhhshTranslator
+    
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._initialize_translator()
     
-    def _initialize_translator(self):
+    def _initialize_translator(self) -> None:
         """初始化翻译器"""
         translation_config = self.plugin_config.get("translation", {})
         self.translator = NbnhhshTranslator(translation_config)
         
-    async def execute(self, function_args: dict) -> dict:
-        """执行缩写翻译"""
+    async def execute(self, function_args: Dict[str, Any]) -> Dict[str, str]:
+        """执行缩写翻译
+        
+        Args:
+            function_args: 包含 'term' 和可选 'max_results' 的字典
+            
+        Returns:
+            包含 'name' 和 'content' 的结果字典
+        """
         try:
             term = function_args.get("term", "").strip()
             max_results = function_args.get("max_results", 3)
