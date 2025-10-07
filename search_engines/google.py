@@ -13,8 +13,11 @@ from .base import BaseSearchEngine, SearchResult
 
 class GoogleEngine(BaseSearchEngine):
     """Google 搜索引擎实现"""
+    
+    lang: str
+    proxy: Optional[str]
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         if not HAS_GOOGLESEARCH:
             raise ImportError("没有googlesearch-python。")
@@ -22,7 +25,15 @@ class GoogleEngine(BaseSearchEngine):
         self.proxy = self.config.get("proxy") or os.environ.get("https_proxy")
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
-        """使用 googlesearch 库进行搜索"""
+        """使用 googlesearch 库进行搜索
+        
+        Args:
+            query: 搜索查询
+            num_results: 期望的结果数量
+            
+        Returns:
+            搜索结果列表
+        """
         try:
             # 在线程池中执行同步的 googlesearch，避免阻塞
             loop = asyncio.get_event_loop()
