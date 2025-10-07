@@ -646,7 +646,7 @@ class google_search_simple(BasePlugin):
         },
         "search_backend": {
             "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou/duckduckgo)"),
-            "max_results": ConfigField(type=int, default=5, description="默认返回结果数量"),
+            "max_results": ConfigField(type=int, default=10, description="默认返回结果数量"),
             "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
             "proxy": ConfigField(type=str, default="", description="用于搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。如果留空则不使用代理。"),
             "fetch_content": ConfigField(type=bool, default=True, description="是否抓取网页内容"),
@@ -817,5 +817,6 @@ class google_search_simple(BasePlugin):
         if "plugin" in self.config and "enabled" in self.config["plugin"]:
             self.enable_plugin = self.config["plugin"]["enabled"]
             logger.debug(f"{self.log_prefix} 从配置更新插件启用状态: {self.enable_plugin}")
+
 
 
