@@ -8,7 +8,11 @@ from .base import BaseSearchEngine, SearchResult
 class SogouEngine(BaseSearchEngine):
     """搜狗搜索引擎实现"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    base_urls: List[str]
+    s_from: str
+    sst_type: str
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         self.base_urls = ["https://www.sogou.com", "https://m.sogou.com"]
         self.headers.update({
@@ -47,6 +51,14 @@ class SogouEngine(BaseSearchEngine):
         return results
     
     async def _parse_sogou_redirect(self, url: str) -> str:
+        """解析搜狗重定向URL
+        
+        Args:
+            url: 重定向URL
+            
+        Returns:
+            真实URL
+        """
         html = await self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         script = soup.find("script")
