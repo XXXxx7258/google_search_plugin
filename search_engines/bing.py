@@ -8,7 +8,12 @@ logger = logging.getLogger(__name__)
 class BingEngine(BaseSearchEngine):
     """Bing 搜索引擎实现"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    base_urls: List[str]
+    region: str
+    setlang: str
+    count: int
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         self.base_urls = ["https://cn.bing.com", "https://www.bing.com"]
         self.region = self.config.get("region", "zh-CN")
@@ -16,7 +21,14 @@ class BingEngine(BaseSearchEngine):
         self.count = self.config.get("count", 10)
 
     def _set_selector(self, selector: str) -> str:
-        """获取页面元素选择器"""
+        """获取页面元素选择器
+        
+        Args:
+            selector: 选择器名称
+            
+        Returns:
+            CSS选择器字符串
+        """
         selectors = {
             "url": "h2 > a",
             "title": "h2 > a",
@@ -27,7 +39,14 @@ class BingEngine(BaseSearchEngine):
         return selectors.get(selector, "")
 
     async def _get_next_page(self, query: str) -> str:
-        """构建并获取搜索页面的HTML内容"""
+        """构建并获取搜索页面的HTML内容
+        
+        Args:
+            query: 搜索查询
+            
+        Returns:
+            HTML内容
+        """
         base_url = self.base_urls[0]
         params = {
             "q": query,
