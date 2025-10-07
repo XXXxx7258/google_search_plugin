@@ -2,8 +2,9 @@ import os
 import asyncio
 import random
 import time
+import re
 import base64
-from typing import List, Tuple, Type, Dict, Any, Optional
+from typing import List, Tuple, Type, Dict, Any, Optional, Union
 from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
 from dataclasses import dataclass
 
@@ -34,20 +35,29 @@ from .search_engines.duckduckgo import DuckDuckGoEngine
 
 # 导入翻译工具
 from .tools.abbreviation_tool import AbbreviationTool
+from .tools.fetchers.zhihu_fetcher import ZhihuArticleFetcher
 
 logger = get_logger("google_search")
 
 class WebSearchTool(BaseTool):
     """Web 搜索工具"""
     
-    name = "web_search"
-    description = "谷歌搜索工具。当见到有人发出疑问或者遇到不熟悉的事情时候，直接使用它获得最新知识！"
-    parameters = [
+    name: str = "web_search"
+    description: str = "谷歌搜索工具。当见到有人发出疑问或者遇到不熟悉的事情时候，直接使用它获得最新知识！"
+    parameters: List[Tuple[str, ToolParamType, str, bool, None]] = [
         ("question", ToolParamType.STRING, "需要搜索的消息", True, None),
     ]
-    available_for_llm = True
+    available_for_llm: bool = True
+    
+    # 实例属性类型注解
+    google: GoogleEngine
+    bing: BingEngine
+    sogo: SogouEngine
+    duckduckgo: DuckDuckGoEngine
+    model_config: Dict[str, Any]
+    backend_config: Dict[str, Any]
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._initialize_engines()
 
@@ -77,8 +87,15 @@ class WebSearchTool(BaseTool):
         self.model_config = config.get("model_config", {})
         self.backend_config = config.get("search_backend", {})
 
-    async def execute(self, function_args: dict) -> dict:
-        """执行搜索"""
+    async def execute(self, function_args: Dict[str, Any]) -> Dict[str, str]:
+        """执行搜索
+        
+        Args:
+            function_args: 包含 'question' 键的字典
+            
+        Returns:
+            包含 'name' 和 'content' 键的结果字典
+        """
         question = function_args.get("question", "").strip()
         if not question:
             return {"name": self.name, "content": "问题为空，无法执行搜索。"}
@@ -92,7 +109,14 @@ class WebSearchTool(BaseTool):
             return {"name": self.name, "content": f"搜索失败: {str(e)}"}
 
     async def _execute_model_driven_search(self, question: str) -> str:
-        """执行模型驱动的智能搜索流程"""
+        """执行模型驱动的智能搜索流程
+        
+        Args:
+            question: 用户提出的问题
+            
+        Returns:
+            搜索结果的总结文本
+        """
         # 1. 获取全局上下文
         time_gap = self.model_config.get("context_time_gap", 300)
         max_limit = self.model_config.get("context_max_limit", 15)
@@ -136,7 +160,14 @@ class WebSearchTool(BaseTool):
         return final_answer
 
     async def _call_llm(self, prompt: str) -> str:
-        """统一的LLM调用函数"""
+        """统一的LLM调用函数
+        
+        Args:
+            prompt: 发送给LLM的提示词
+            
+        Returns:
+            LLM生成的文本响应
+        """
         try:
             # 智能选择模型
             models = llm_api.get_available_models()
@@ -174,7 +205,15 @@ class WebSearchTool(BaseTool):
             return f"在处理信息时遇到了一个内部错误: {e}"
 
     def _build_rewrite_prompt(self, question: str, context: str) -> str:
-        """构建用于查询重写的Prompt"""
+        """构建用于查询重写的Prompt
+        
+        Args:
+            question: 用户原始问题
+            context: 聊天上下文
+            
+        Returns:
+            格式化的提示词
+        """
         return f"""
         [任务]
         你是一个专业的搜索查询分析师。你的任务是根据用户当前的提问和最近的聊天记录，生成一个最适合在搜索引擎中使用的高效、精确的关键词。
@@ -197,7 +236,16 @@ class WebSearchTool(BaseTool):
         """
 
     def _build_summarize_prompt(self, original_question: str, search_query: str, results: List[SearchResult]) -> str:
-        """构建用于总结搜索结果的Prompt"""
+        """构建用于总结搜索结果的Prompt
+        
+        Args:
+            original_question: 用户原始问题
+            search_query: 重写后的搜索关键词
+            results: 搜索结果列表
+            
+        Returns:
+            格式化的提示词
+        """
         formatted_results = self._format_results(results)
         return f"""
         [任务]
@@ -224,7 +272,15 @@ class WebSearchTool(BaseTool):
 
     
     async def _search_with_fallback(self, query: str, num_results: int) -> List[SearchResult]:
-        """带降级的搜索"""
+        """带降级的搜索
+        
+        Args:
+            query: 搜索关键词
+            num_results: 期望返回的结果数量
+            
+        Returns:
+            搜索结果列表，如果所有引擎都失败则返回空列表
+        """
         config = self.plugin_config
         engines_config = self.plugin_config.get("engines", {})
         
@@ -262,7 +318,59 @@ class WebSearchTool(BaseTool):
         return []
     
     async def _fetch_page_content(self, session: aiohttp.ClientSession, url: str) -> Optional[str]:
-        """抓取单个页面的正文内容"""
+        """抓取单个页面的正文内容，增加了对知乎的特殊处理
+        
+        Args:
+            session: aiohttp会话对象
+            url: 待抓取的URL
+            
+        Returns:
+            提取的正文内容，失败时返回None
+        """
+        # --- 知乎特殊处理 ---
+        if "zhuanlan.zhihu.com" in url: # 只处理我们确认能抓取的文章链接
+            # 检查总开关和Cookie是否都已配置
+            backend_config = self.plugin_config.get("search_backend", {})
+            if not backend_config.get("enable_zhihu_fetcher"):
+                return None # 功能未启用，直接跳过
+
+            logger.info(f"检测到知乎文章链接，使用专用抓取器: {url}")
+            fetcher = None
+            try:
+                zhihu_cookie_config = backend_config.get("zhihu_cookie", {})
+                _xsrf = zhihu_cookie_config.get("_xsrf")
+                d_c0 = zhihu_cookie_config.get("d_c0")
+                z_c0 = zhihu_cookie_config.get("z_c0")
+
+                if not all([_xsrf, d_c0, z_c0]):
+                    logger.warning("知乎专用抓取器已启用，但未完整配置 [zhihu_cookie]（缺少 _xsrf, d_c0, 或 z_c0），跳过。")
+                    return None
+                
+                # 构造完整的 cookie 字符串
+                zhihu_cookie_str = f'"_xsrf={_xsrf}; d_c0={d_c0}; z_c0={z_c0}"'
+
+                article_match = re.search(r'zhuanlan\.zhihu\.com/p/(\d+)', url)
+                if not article_match:
+                    return None # 不是标准的文章链接格式
+
+                article_id = article_match.group(1)
+                fetcher = ZhihuArticleFetcher(cookie_string=zhihu_cookie_str)
+                success, content = await fetcher.fetch_article(article_id)
+                
+                if success:
+                    logger.info("知乎文章抓取器成功获取内容。")
+                    return content
+                else:
+                    logger.warning(f"知乎文章抓取器失败: {content}")
+                    return None
+            except Exception as e:
+                logger.error(f"调用知乎文章抓取器时发生异常: {e}", exc_info=True)
+                return None
+            finally:
+                if fetcher:
+                    await fetcher.close()
+        # --------------------
+
         timeout = self.backend_config.get("content_timeout", 10)
         max_length = self.backend_config.get("max_content_length", 3000)
         
@@ -310,7 +418,14 @@ class WebSearchTool(BaseTool):
             return None
 
     async def _fetch_content_for_results(self, results: List[SearchResult]) -> List[SearchResult]:
-        """为搜索结果并发抓取内容，增强了异常处理和格式化。"""
+        """为搜索结果并发抓取内容，增强了异常处理和格式化
+        
+        Args:
+            results: 搜索结果列表
+            
+        Returns:
+            补充了内容的搜索结果列表
+        """
 
         urls_to_fetch = [result.url for result in results if result.url]
         if not urls_to_fetch:
@@ -336,7 +451,14 @@ class WebSearchTool(BaseTool):
         return results
     
     def _format_results(self, results: List[SearchResult]) -> str:
-        """格式化搜索结果"""
+        """格式化搜索结果
+        
+        Args:
+            results: 搜索结果列表
+            
+        Returns:
+            格式化后的文本字符串
+        """
         lines = []
         
         for idx, result in enumerate(results, start=1):
@@ -359,33 +481,39 @@ class WebSearchTool(BaseTool):
 class ImageSearchAction(BaseAction):
     """图片搜索动作"""
     
-    action_name = "image_search"
-    action_description = "当用户明确需要搜索图片时使用此动作。例如：'搜索一下猫的图片'、'来张风景图'。"
+    action_name: str = "image_search"
+    action_description: str = "当用户明确需要搜索图片时使用此动作。例如：'搜索一下猫的图片'、'来张风景图'。"
     
     # 激活类型：让LLM来判断是否需要搜索图片
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type: ActionActivationType = ActionActivationType.LLM_JUDGE
     
     # 关联类型：这个Action会发送图片
-    associated_types = ["image"]
+    associated_types: List[str] = ["image"]
     
     # LLM决策所需参数
-    action_parameters = {
+    action_parameters: Dict[str, str] = {
         "query": "需要搜索的图片关键词"
     }
     
     # LLM决策使用场景
-    action_require = [
+    action_require: List[str] = [
         "当用户明确表示想看、想搜索或想要一张图片时使用。",
         "适用于'搜/找/来一张/发一张xx的图片'等指令。",
         "如果用户只是在普通聊天中提到了某个事物，不代表他想要图片，此时不应使用。",
         "一次只发送一张最相关的图片。"
     ]
+    
+    # 实例属性
+    enabled: bool
+    duckduckgo: DuckDuckGoEngine
+    backend_config: Dict[str, Any]
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         
         # 检查是否启用图片搜索功能
-        self.enabled = self.get_config("actions.image_search.enabled", False)
+        enabled_value = self.get_config("actions.image_search.enabled", False)
+        self.enabled = bool(enabled_value) if enabled_value is not None else False
         
         if not self.enabled:
             logger.info("图片搜索功能已在配置中禁用")
@@ -404,7 +532,11 @@ class ImageSearchAction(BaseAction):
         self.backend_config = config.get("search_backend", {})
 
     async def execute(self) -> Tuple[bool, str]:
-        """执行图片搜索并直接发送图片"""
+        """执行图片搜索并直接发送图片
+        
+        Returns:
+            (是否成功, 状态描述) 的元组
+        """
         # 检查是否启用
         if not getattr(self, 'enabled', False):
             await self.send_text(
@@ -429,14 +561,18 @@ class ImageSearchAction(BaseAction):
                 await self.send_text(f"我没找到关于「{query}」的图片呢。", set_reply=True, reply_message=self.action_message)
                 return False, "未找到图片"
 
-            image_urls = [item.get('image') for item in image_results if item.get('image')]
+            # 过滤掉None值，确保类型安全
+            image_urls: List[str] = [
+                url for item in image_results
+                if (url := item.get('image')) is not None
+            ]
             if not image_urls:
                 await self.send_text("虽然找到了结果，但好像没有有效的图片地址。", set_reply=True, reply_message=self.action_message)
                 return False, "无有效图片地址"
 
-            async def _fetch_image(session, url):
+            async def _fetch_image(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
                 try:
-                    async with session.get(url, timeout=10) as response:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                         if response.status == 200:
                             return await response.read()
                 except Exception as e:
@@ -446,6 +582,8 @@ class ImageSearchAction(BaseAction):
             # 尝试下载并发送第一张成功的图片
             async with aiohttp.ClientSession(trust_env=True) as session:
                 for url in image_urls:
+                    if not url:  # 额外的安全检查
+                        continue
                     image_data = await _fetch_image(session, url)
                     if image_data:
                         # 编码为base64
@@ -482,13 +620,14 @@ class google_search_simple(BasePlugin):
         "aiohttp>=3.8.0",
         "beautifulsoup4>=4.11.0",
         "lxml>=4.9.0",
+        "httpx>=0.25.0",
         "readability-lxml>=0.8.1",
         "googlesearch-python>=1.2.3",
         "ddgs",
     ]
     config_file_name: str = "config.toml"
     
-    config_schema: dict = {
+    config_schema: Dict[str, Dict[str, Union[ConfigField, Dict]]] = {
         "plugin": {
             "name": ConfigField(type=str, default="google_search", description="插件名称"),
             "version": ConfigField(type=str, default="3.0.0", description="插件版本"),
@@ -522,6 +661,16 @@ class google_search_simple(BasePlugin):
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
                 ],
                 description="抓取网页时使用的 User-Agent 列表，会从中随机选择。"
+            ),
+            "zhihu_cookie": {
+                "_xsrf": ConfigField(type=str, default="", description="知乎Cookie的 _xsrf 字段"),
+                "d_c0": ConfigField(type=str, default="", description="知乎Cookie的 d_c0 字段"),
+                "z_c0": ConfigField(type=str, default="", description="知乎Cookie的 z_c0 字段"),
+            },
+            "enable_zhihu_fetcher": ConfigField(
+                type=bool,
+                default=False,
+                description="是否启用知乎专用抓取器。注意：启用此功能需要先在您的系统中安装 Node.js 环境（一键包用户自带nodejs，添加到环境中即可）。"
             ),
         },
         "engines": {
@@ -562,8 +711,15 @@ class google_search_simple(BasePlugin):
         
         return components
 
-    def _get_default_config_from_schema(self, schema_part: dict) -> dict:
-        """递归地从 schema 生成默认配置字典"""
+    def _get_default_config_from_schema(self, schema_part: Dict[str, Any]) -> Dict[str, Any]:
+        """递归地从 schema 生成默认配置字典
+        
+        Args:
+            schema_part: 配置schema的一部分
+            
+        Returns:
+            默认配置字典
+        """
         config = {}
         for key, value in schema_part.items():
             if isinstance(value, ConfigField):
@@ -572,7 +728,7 @@ class google_search_simple(BasePlugin):
                 config[key] = self._get_default_config_from_schema(value)
         return config
 
-    def _generate_toml_string(self, schema_part: dict, config_part: dict, indent: str = "", parent_path: str = "") -> str:
+    def _generate_toml_string(self, schema_part: Dict[str, Any], config_part: Dict[str, Any], indent: str = "", parent_path: str = "") -> str:
         """递归地生成带注释的 toml 字符串
         
         Args:
@@ -611,8 +767,8 @@ class google_search_simple(BasePlugin):
                 toml_str += self._generate_toml_string(schema_value, config_part.get(key, {}), indent, current_path)
         return toml_str
 
-    def _load_plugin_config(self):
-        """覆盖基类的配置加载方法，以正确处理嵌套配置。"""
+    def _load_plugin_config(self) -> None:
+        """覆盖基类的配置加载方法，以正确处理嵌套配置"""
         import toml
 
         if not self.config_file_name:
@@ -661,3 +817,5 @@ class google_search_simple(BasePlugin):
         if "plugin" in self.config and "enabled" in self.config["plugin"]:
             self.enable_plugin = self.config["plugin"]["enabled"]
             logger.debug(f"{self.log_prefix} 从配置更新插件启用状态: {self.enable_plugin}")
+
+
