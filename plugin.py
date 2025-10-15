@@ -70,7 +70,8 @@ class WebSearchTool(BaseTool):
         # 将顶层配置注入到每个引擎
         common_config = {
             "timeout": backend_config.get("timeout", 20),
-            "proxy": backend_config.get("proxy")
+            "proxy": backend_config.get("proxy"),
+            "max_results": backend_config.get("max_results", 10)
         }
         
         google_config = {**engines_config.get("google", {}), **common_config}
@@ -140,7 +141,7 @@ class WebSearchTool(BaseTool):
         logger.info(f"模型重写后的搜索查询: {rewritten_query}")
 
         # 4. 执行后端搜索
-        max_results = self.backend_config.get("max_results", 5)
+        max_results = self.backend_config.get("max_results", 10)
         search_results = await self._search_with_fallback(rewritten_query, max_results)
 
         if not search_results:
@@ -553,7 +554,7 @@ class ImageSearchAction(BaseAction):
 
         try:
             logger.info(f"开始执行图片搜索动作，关键词: {query}")
-            num_results = self.backend_config.get("max_results", 5) # 搜索5个结果以提高成功率
+            num_results = self.backend_config.get("max_results", 10) # 搜索结果数量配置
             
             image_results = await self.duckduckgo.search_images(query, num_results)
             
