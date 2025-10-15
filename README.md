@@ -10,14 +10,15 @@
 
 ## 📦 依赖安装
 
-注意：**一键包**用户在“点我启动！！！.bat”后选择"11. 交互式安装pip模块",在其中输入requirements.txt的路径即可！（如："E:\Downloads\MaiBotOneKey\modules\MaiBot\plugins\google_search_plugin\requirements.txt"）
-
 为了确保插件正常工作，您需要安装Python依赖。**在你的麦麦的运行环境**中于**本插件**的根目录下执行以下命令即可：
 
 ```bash
 pip install -r requirements.txt
 
 ```
+如果是uv安装，在pip前面加上uv即可，如uv pip install -r requirements.txt
+
+注意：**一键包**用户在“点我启动！！！.bat”后选择"11. 交互式安装pip模块",在其中输入requirements.txt的路径即可！（如："E:\Downloads\MaiBotOneKey\modules\MaiBot\plugins\google_search_plugin\requirements.txt"）
 
 ## 工作流程
 
@@ -80,6 +81,7 @@ pip install -r requirements.txt
 
 
 ---
+
 
 
 
