@@ -348,7 +348,7 @@ class WebSearchTool(BaseTool):
                     return None
                 
                 # 构造完整的 cookie 字符串
-                zhihu_cookie_str = f'"_xsrf={_xsrf}; d_c0={d_c0}; z_c0={z_c0}"'
+                zhihu_cookie_str = f"_xsrf={_xsrf}; d_c0={d_c0}; z_c0={z_c0}"
 
                 article_match = re.search(r'zhuanlan\.zhihu\.com/p/(\d+)', url)
                 if not article_match:
