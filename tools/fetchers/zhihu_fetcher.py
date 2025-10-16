@@ -1,11 +1,12 @@
 """
-知乎文章抓取器
-仅处理知乎文章（zhuanlan）的抓取
+知乎内容抓取器
+支持处理知乎文章、问题、回答的抓取
 """
 import os
 import re
 import json
 import subprocess
+import datetime
 from typing import Tuple, Dict, Optional, Any
 from urllib.parse import urlparse
 
@@ -13,7 +14,7 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 
 class ZhihuArticleFetcher:
-    """一个独立的、轻量级的知乎文章抓取器"""
+    """通用知乎内容抓取器，支持文章、问题、回答"""
     
     cookie_string: str
     httpx_client: httpx.AsyncClient
@@ -121,3 +122,83 @@ class ZhihuArticleFetcher:
 
         result = f"标题: {title}\n\n{content_text}"
         return True, result
+
+    async def fetch_question(self, question_id: str) -> Tuple[bool, str]:
+        """抓取知乎问题内容
+
+        Args:
+            question_id: 知乎问题ID
+
+        Returns:
+            (是否成功, 问题内容或错误信息) 的元组
+        """
+        api_url = f"https://www.zhihu.com/api/v4/questions/{question_id}?include=detail,excerpt,author,answer_count,follower_count,created"
+        response = await self._request_with_retry(api_url)
+
+        if response.status_code != 200:
+            return False, f"API请求失败，状态码: {response.status_code}, 响应: {response.text[:200]}"
+
+        try:
+            data = response.json()
+            title = data.get('title', '未知问题')
+            detail = data.get('detail', data.get('excerpt', ''))
+            author_info = data.get('author', {})
+            author_name = author_info.get('name', '未知提问者')
+            answer_count = data.get('answer_count', 0)
+            follower_count = data.get('follower_count', 0)
+            created = data.get('created', 0)
+
+            # 解析HTML内容
+            if detail:
+                soup = BeautifulSoup(detail, 'lxml')
+                detail_text = soup.get_text('\n', strip=True)
+            else:
+                detail_text = "无详细描述"
+
+            created_time = datetime.datetime.fromtimestamp(created).strftime('%Y-%m-%d %H:%M:%S') if created else '未知'
+
+            result = f"问题: {title}\n提问者: {author_name}\n提问时间: {created_time}\n回答数: {answer_count}\n关注数: {follower_count}\n\n问题描述:\n{detail_text}"
+            return True, result
+        except Exception as e:
+            return False, f"解析问题数据失败: {e}"
+
+    async def fetch_answer(self, answer_id: str) -> Tuple[bool, str]:
+        """抓取知乎回答内容
+
+        Args:
+            answer_id: 知乎回答ID
+
+        Returns:
+            (是否成功, 回答内容或错误信息) 的元组
+        """
+        api_url = f"https://www.zhihu.com/api/v4/answers/{answer_id}?include=content,excerpt,author,question,voteup_count,comment_count,created"
+        response = await self._request_with_retry(api_url)
+
+        if response.status_code != 200:
+            return False, f"API请求失败，状态码: {response.status_code}, 响应: {response.text[:200]}"
+
+        try:
+            data = response.json()
+            content = data.get('content', data.get('excerpt', ''))
+            author_info = data.get('author', {})
+            author_name = author_info.get('name', '未知回答者')
+            author_headline = author_info.get('headline', '')
+            question = data.get('question', {})
+            question_title = question.get('title', '未知问题')
+            voteup_count = data.get('voteup_count', 0)
+            comment_count = data.get('comment_count', 0)
+            created = data.get('created', 0)
+
+            # 解析HTML内容
+            soup = BeautifulSoup(content, 'lxml')
+            content_text = soup.get_text('\n', strip=True)
+
+            created_time = datetime.datetime.fromtimestamp(created).strftime('%Y-%m-%d %H:%M:%S') if created else '未知'
+
+            result = f"问题: {question_title}\n回答者: {author_name}"
+            if author_headline:
+                result += f"\n回答者简介: {author_headline}"
+            result += f"\n回答时间: {created_time}\n点赞数: {voteup_count}\n评论数: {comment_count}\n\n回答内容:\n{content_text}"
+            return True, result
+        except Exception as e:
+            return False, f"解析回答数据失败: {e}"
