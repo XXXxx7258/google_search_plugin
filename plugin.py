@@ -4,6 +4,7 @@ import random
 import time
 import re
 import base64
+import warnings
 from typing import List, Tuple, Type, Dict, Any, Optional, Union
 from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
 from dataclasses import dataclass
@@ -11,6 +12,9 @@ from dataclasses import dataclass
 import aiohttp
 from bs4 import BeautifulSoup
 from readability import Document
+
+# 抑制readability的ruthless removal警告
+warnings.filterwarnings("ignore", message=".*ruthless removal.*")
 
 from src.common.logger import get_logger
 from src.plugin_system import (
@@ -170,7 +174,7 @@ class WebSearchTool(BaseTool):
             LLM生成的文本响应
         """
         try:
-            # 智能选择模型
+            # 选择模型
             models = llm_api.get_available_models()
             if not models:
                 raise ValueError("系统中没有可用的LLM模型配置。")
@@ -309,7 +313,7 @@ class WebSearchTool(BaseTool):
                 continue
                 
             try:
-                # 关键改动：调用基类中统一的、带重试的方法
+                # 调用基类中统一的、带重试的方法
                 results = await engine.search(query, num_results)
                 if results:
                     logger.info(f"{engine_name} 搜索成功，返回 {len(results)} 条结果")
@@ -431,16 +435,56 @@ class WebSearchTool(BaseTool):
                         # 最终回退
                         html = html_bytes.decode('utf-8', errors='ignore')
                 
-                # 使用 readability-lxml 提取正文
-                doc = Document(html)
-                summary_html = doc.summary()
+                # 内容提取
                 
-                # 使用 BeautifulSoup 清理并提取文本
-                soup = BeautifulSoup(summary_html, 'lxml')
-                content_text = soup.get_text(separator='\n', strip=True)
+                # 使用 trafilatura
+                try:
+                    import trafilatura
+                    extracted_text = trafilatura.extract(
+                        html,
+                        include_comments=False,
+                        include_tables=True,
+                        no_fallback=False
+                    )
+                    if extracted_text and len(extracted_text.strip()) > 100:
+                        logger.debug(f"使用trafilatura成功提取内容: {url}")
+                        return extracted_text.strip()[:max_length]
+                except ImportError:
+                    logger.debug("trafilatura未安装，跳过")
+                except Exception as e:
+                    logger.debug(f"trafilatura提取失败: {e}")
                 
-                # 截断到最大长度
-                return content_text[:max_length]
+                # 使用 readability-lxml
+                try:
+                    doc = Document(
+                        html,
+                        min_text_length=50,
+                        retry_length=250,
+                        url=url
+                    )
+                    summary_html = doc.summary()
+                    soup = BeautifulSoup(summary_html, 'lxml')
+                    readability_text = soup.get_text(separator='\n', strip=True)
+                    
+                    if readability_text and len(readability_text) > 100:
+                        logger.debug(f"使用readability成功提取内容: {url}")
+                        return readability_text[:max_length]
+                except Exception as e:
+                    logger.debug(f"readability提取失败: {e}")
+                
+                # 使用 BeautifulSoup
+                try:
+                    soup = BeautifulSoup(html, 'lxml')
+                    # 移除无用标签
+                    for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                        tag.decompose()
+                    fallback_text = soup.get_text(separator='\n', strip=True)
+                    
+                    logger.debug(f"使用BeautifulSoup兜底提取: {url}")
+                    return fallback_text[:max_length] if fallback_text else None
+                except Exception as e:
+                    logger.error(f"BeautifulSoup提取也失败: {e}")
+                    return None
                 
         except asyncio.TimeoutError:
             logger.warning(f"抓取内容超时: {url}")
@@ -656,6 +700,7 @@ class google_search_simple(BasePlugin):
         "readability-lxml>=0.8.1",
         "googlesearch-python>=1.2.3",
         "ddgs",
+        "trafilatura>=1.6.0",
     ]
     config_file_name: str = "config.toml"
     
