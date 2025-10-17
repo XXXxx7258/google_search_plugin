@@ -6,6 +6,7 @@ import aiohttp
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import urllib.parse
+from urllib.parse import urlparse, urljoin
 
 warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
 logger = logging.getLogger(__name__)
@@ -98,15 +99,102 @@ class BaseSearchEngine:
                     return await resp.text()
 
     def tidy_text(self, text: str) -> str:
-        """清理文本
-        
+        """清理文本，包含Unicode字符规范化
+
         Args:
             text: 原始文本
-            
+
         Returns:
             清理后的文本
         """
-        return text.strip().replace("\n", " ").replace("\r", " ").replace("  ", " ")
+        if not text:
+            return ""
+
+        # 规范化Unicode字符，将各种空格字符统一为标准空格
+        import unicodedata
+
+        # 将Unicode文本规范化为NFC形式
+        text = unicodedata.normalize('NFC', text)
+
+        # 替换各种Unicode空格字符为标准空格
+        unicode_spaces = [
+            '\u00A0',  # 不间断空格
+            '\u2002',  # en space
+            '\u2003',  # em space
+            '\u2009',  # thin space
+            '\u200A',  # hair space
+            '\u200B',  # 零宽空格
+            '\u2060',  # 字符连接符
+            '\u3000',  # 全角空格
+        ]
+
+        for unicode_space in unicode_spaces:
+            text = text.replace(unicode_space, ' ')
+
+        # 常规文本清理
+        text = text.strip().replace("\n", " ").replace("\r", " ")
+
+        # 合并多个空格为单个空格
+        while "  " in text:
+            text = text.replace("  ", " ")
+
+        return text
+
+    def _is_valid_url(self, url: str) -> bool:
+        """验证URL是否有效
+
+        Args:
+            url: 待验证的URL字符串
+
+        Returns:
+            URL是否有效
+        """
+        if not url or not isinstance(url, str):
+            return False
+
+        try:
+            parsed = urlparse(url)
+            # 检查协议是否为http或https
+            if parsed.scheme not in ['http', 'https']:
+                return False
+            # 检查是否有域名
+            if not parsed.netloc:
+                return False
+            # 过滤掉javascript等非网页链接
+            if url.lower().startswith(('javascript:', 'mailto:', 'tel:', 'ftp:')):
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _normalize_url(self, url_raw: str, base_url: str = "") -> str:
+        """规范化URL处理
+
+        Args:
+            url_raw: 原始URL字符串
+            base_url: 基础URL，用于相对路径转换
+
+        Returns:
+            规范化后的URL字符串
+        """
+        if not url_raw:
+            return ""
+
+        try:
+            # 只对URL进行解码，不对文本内容解码
+            url = urllib.parse.unquote(str(url_raw))
+
+            # 如果是相对URL，转换为绝对URL
+            if base_url and not url.startswith(('http://', 'https://')):
+                url = urljoin(base_url, url)
+
+            # 验证URL有效性
+            if self._is_valid_url(url):
+                return url
+            else:
+                return ""
+        except Exception:
+            return ""
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
         """执行搜索
@@ -134,20 +222,24 @@ class BaseSearchEngine:
             text_selector = self._set_selector("text")
 
             for idx, link in enumerate(links):
+                # 处理标题 - 不进行URL解码，只进行文本清理
                 title_elem = link.select_one(title_selector)
-                title = self.tidy_text(urllib.parse.unquote(title_elem.text)) if title_elem else ""
+                title = self.tidy_text(title_elem.text) if title_elem else ""
 
+                # 处理URL - 使用新的规范化方法
                 url_elem = link.select_one(url_selector)
                 url_raw = url_elem.get("href") if url_elem else ""
-                url = urllib.parse.unquote(str(url_raw)) if url_raw else ""
+                url = self._normalize_url(url_raw)
 
+                # 处理摘要 - 不进行URL解码，只进行文本清理
                 snippet = ""
                 if text_selector:
                     snippet_elem = link.select_one(text_selector)
-                    snippet = self.tidy_text(urllib.parse.unquote(snippet_elem.text)) if snippet_elem else ""
+                    snippet = self.tidy_text(snippet_elem.text) if snippet_elem else ""
 
+                # 只有当标题和URL都有效时才添加结果
                 if title and url:
-                    results.append(SearchResult(title=title, url=str(url), snippet=snippet, abstract=snippet, rank=idx))
+                    results.append(SearchResult(title=title, url=url, snippet=snippet, abstract=snippet, rank=idx))
 
             logger.info(f"Returning {len(results[:num_results])} search results for query '{query}'")
             return results[:num_results]
