@@ -421,7 +421,7 @@ class WebSearchTool(BaseTool):
                 url,
                 timeout=timeout,
                 headers=headers,
-                proxy=self.backend_config.get("proxy")
+                proxy=self.backend_config.get("proxy") or None
             ) as response:
                 if response.status != 200:
                     logger.warning(f"抓取内容失败，URL: {url}, 状态码: {response.status}")
