@@ -417,7 +417,15 @@ class WebSearchTool(BaseTool):
             ])
             headers = {"User-Agent": random.choice(user_agents)}
             
-            async with session.get(url, timeout=timeout, headers=headers, proxy=self.plugin_config.get("proxy")) as response:
+            request_kwargs = {
+                "timeout": timeout,
+                "headers": headers,
+            }
+            proxy = self.backend_config.get("proxy")
+            if proxy:
+                request_kwargs["proxy"] = proxy
+
+            async with session.get(url, **request_kwargs) as response:
                 if response.status != 200:
                     logger.warning(f"抓取内容失败，URL: {url}, 状态码: {response.status}")
                     return None
