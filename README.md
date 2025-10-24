@@ -6,7 +6,7 @@
 
 （**搜图功能无法直连**）
 
-（tavily搜索引擎可以前往https://app.tavily.com注册后获得密钥）
+（tavily搜索引擎可以前往https://app.tavily.com 注册后获得密钥）
 
 <img width="735" height="308" alt="image" src="https://github.com/user-attachments/assets/9bc86124-b3a8-43e0-addb-1884133658c2" />
 
@@ -91,6 +91,7 @@ pip install -r requirements.txt
 
 
 ---
+
 
 
 
