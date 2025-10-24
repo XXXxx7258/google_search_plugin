@@ -62,7 +62,8 @@ pip install -r requirements.txt
 - `sogou.enabled` (bool): 是否启用搜狗。
 - `duckduckgo.enabled` (bool): 是否启用 DuckDuckGo。
 - `tavily.enabled` (bool): 是否启用 Tavily（需要提供 API key）。
-- `tavily.api_key` (str): Tavily API key，可留空并通过环境变量 `TAVILY_API_KEY` 读取。
+- `tavily.api_keys` (list[str]): Tavily API key 列表，填写多个时会随机选取一个使用。
+- `tavily.api_key` (str): 单个 Tavily API key，可作为后备值；也可以通过环境变量 `TAVILY_API_KEY` 读取。
 - `tavily.include_answer` (bool): 是否直接使用 Tavily 返回的汇总答案（默认开启，不再额外抓取网页）。
 - `tavily.include_raw_content` (bool): 是否让 Tavily 返回网页正文片段供总结使用。
 - `tavily.search_depth` (str): 搜索深度，可选 `basic` 或 `advanced`。
