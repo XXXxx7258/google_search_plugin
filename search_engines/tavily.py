@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class TavilyEngine(BaseSearchEngine):
-    """Tavily API 搜索引擎实现"""
+    """Implementation of the Tavily search engine client."""
 
     BASE_URL = "https://api.tavily.com"
     SEARCH_ENDPOINT = "/search"
@@ -25,7 +26,8 @@ class TavilyEngine(BaseSearchEngine):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self.api_key = (self.config.get("api_key") or os.environ.get("TAVILY_API_KEY") or "").strip()
+        self.api_keys = self._load_api_keys()
+        self.api_key = self.api_keys[0] if self.api_keys else ""
         self.search_depth = self.config.get("search_depth", "basic")
         self.include_raw_content = self.config.get("include_raw_content", True)
         self.include_answer = self.config.get("include_answer", True)
@@ -38,17 +40,19 @@ class TavilyEngine(BaseSearchEngine):
         self.last_answer: Optional[str] = None
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
-        """调用 Tavily API 执行搜索"""
-        if not self.api_key:
-            logger.warning("Tavily API key 未配置，无法执行搜索")
+        """Execute a search request via the Tavily API."""
+        api_key = self._pick_api_key()
+        if not api_key:
+            logger.warning("Tavily API key is not configured; skip Tavily search.")
             return []
 
+        self.api_key = api_key
         self.last_answer = None
 
         request_max_results = min(num_results if num_results > 0 else self.max_results, self.max_results)
 
         payload: Dict[str, Any] = {
-            "api_key": self.api_key,
+            "api_key": api_key,
             "query": query,
             "search_depth": self.search_depth,
             "max_results": request_max_results,
@@ -83,20 +87,20 @@ class TavilyEngine(BaseSearchEngine):
                     response_text = await response.text()
                     if response.status >= 400:
                         logger.error(
-                            "Tavily 搜索请求失败，状态码 %s，响应内容: %s",
+                            "Tavily search request failed with status %s; response body: %s",
                             response.status,
                             response_text,
                         )
                         return []
 
                     if not response_text:
-                        logger.error("Tavily 返回空响应")
+                        logger.error("Tavily returned an empty response.")
                         return []
 
                     try:
                         data = json.loads(response_text)
                     except json.JSONDecodeError:
-                        logger.error("Tavily 返回内容无法解析为 JSON: %s", response_text)
+                        logger.error("Failed to parse Tavily response as JSON: %s", response_text)
                         return []
 
         except Exception as exc:
@@ -137,3 +141,49 @@ class TavilyEngine(BaseSearchEngine):
             )
 
         return results[: min(len(results), num_results)]
+
+    def has_api_keys(self) -> bool:
+        """Return True when at least one Tavily API key is available."""
+        return bool(self.api_keys)
+
+    def _load_api_keys(self) -> List[str]:
+        """Collect the list of Tavily API keys from config and environment."""
+        keys: List[str] = []
+
+        config_keys = self.config.get("api_keys")
+        if isinstance(config_keys, list):
+            for key in config_keys:
+                if isinstance(key, str):
+                    stripped = key.strip()
+                    if stripped:
+                        keys.append(stripped)
+        elif isinstance(config_keys, str):
+            stripped = config_keys.strip()
+            if stripped:
+                keys.append(stripped)
+
+        single_key = self.config.get("api_key")
+        if isinstance(single_key, str):
+            stripped = single_key.strip()
+            if stripped:
+                keys.append(stripped)
+
+        env_key = os.environ.get("TAVILY_API_KEY")
+        if isinstance(env_key, str):
+            stripped = env_key.strip()
+            if stripped:
+                keys.append(stripped)
+
+        unique_keys: List[str] = []
+        seen = set()
+        for key in keys:
+            if key not in seen:
+                seen.add(key)
+                unique_keys.append(key)
+        return unique_keys
+
+    def _pick_api_key(self) -> Optional[str]:
+        """Randomly select one Tavily API key to use for the request."""
+        if not self.api_keys:
+            return None
+        return random.choice(self.api_keys)
