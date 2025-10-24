@@ -321,7 +321,7 @@ class WebSearchTool(BaseTool):
             if not is_enabled:
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
                 continue
-            if engine_name == "tavily" and not getattr(self.tavily, "api_key", ""):
+            if engine_name == "tavily" and not (hasattr(self.tavily, "has_api_keys") and self.tavily.has_api_keys()):
                 logger.info("Tavily 搜索未配置 API key，跳过调用")
                 continue
                 
@@ -825,6 +825,7 @@ class google_search_simple(BasePlugin):
             },
             "tavily": {
                 "enabled": ConfigField(type=bool, default=False, description="是否启用 Tavily 搜索"),
+                "api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时随机选取一个使用"),
                 "api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
                 "search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
                 "include_raw_content": ConfigField(type=bool, default=True, description="是否返回网页原始内容"),
