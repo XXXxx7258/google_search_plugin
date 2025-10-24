@@ -46,7 +46,6 @@ class TavilyEngine(BaseSearchEngine):
             logger.warning("Tavily API key is not configured; skip Tavily search.")
             return []
 
-        self.api_key = api_key
         self.last_answer = None
 
         request_max_results = min(num_results if num_results > 0 else self.max_results, self.max_results)
@@ -148,39 +147,26 @@ class TavilyEngine(BaseSearchEngine):
 
     def _load_api_keys(self) -> List[str]:
         """Collect the list of Tavily API keys from config and environment."""
-        keys: List[str] = []
+        def _collect(value: Optional[Any]) -> List[str]:
+            if isinstance(value, str):
+                cleaned = value.strip()
+                return [cleaned] if cleaned else []
+            if isinstance(value, (list, tuple, set)):
+                items: List[str] = []
+                for item in value:
+                    if isinstance(item, str):
+                        cleaned = item.strip()
+                        if cleaned:
+                            items.append(cleaned)
+                return items
+            return []
 
-        config_keys = self.config.get("api_keys")
-        if isinstance(config_keys, list):
-            for key in config_keys:
-                if isinstance(key, str):
-                    stripped = key.strip()
-                    if stripped:
-                        keys.append(stripped)
-        elif isinstance(config_keys, str):
-            stripped = config_keys.strip()
-            if stripped:
-                keys.append(stripped)
+        candidates: List[str] = []
+        candidates.extend(_collect(self.config.get("api_keys")))
+        candidates.extend(_collect(self.config.get("api_key")))
+        candidates.extend(_collect(os.environ.get("TAVILY_API_KEY")))
 
-        single_key = self.config.get("api_key")
-        if isinstance(single_key, str):
-            stripped = single_key.strip()
-            if stripped:
-                keys.append(stripped)
-
-        env_key = os.environ.get("TAVILY_API_KEY")
-        if isinstance(env_key, str):
-            stripped = env_key.strip()
-            if stripped:
-                keys.append(stripped)
-
-        unique_keys: List[str] = []
-        seen = set()
-        for key in keys:
-            if key not in seen:
-                seen.add(key)
-                unique_keys.append(key)
-        return unique_keys
+        return list(dict.fromkeys(candidates))
 
     def _pick_api_key(self) -> Optional[str]:
         """Randomly select one Tavily API key to use for the request."""
