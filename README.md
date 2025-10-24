@@ -6,6 +6,8 @@
 
 （**搜图功能无法直连**）
 
+（tavily搜索引擎可以前往https://app.tavily.com注册后获得密钥）
+
 <img width="735" height="308" alt="image" src="https://github.com/user-attachments/assets/9bc86124-b3a8-43e0-addb-1884133658c2" />
 
 ## 📦 依赖安装
@@ -44,7 +46,7 @@ pip install -r requirements.txt
 ### `[search_backend]`
 这里配置供模型调用的“后端”搜索引擎的行为。
 
-- `default_engine` (str): 默认使用的搜索引擎 (`google`, `bing`, `sogou`)。
+- `default_engine` (str): 默认使用的搜索引擎 (`google`, `bing`, `sogou`, `duckduckgo`, `tavily`)。
 - `max_results` (int): 每次搜索返回给模型阅读的结果数量。
 - `timeout` (int): 后端搜索引擎的超时时间。
 - `proxy` (str): 用于后端搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。默认为空字符串，表示不使用代理。
@@ -53,11 +55,19 @@ pip install -r requirements.txt
 - `max_content_length` (int): 抓取的单个网页最大内容长度。
 
 ### `[engines]`
-对每个具体搜索引擎的微调配置。
+对每个具体搜索引擎的可选配置项：
 
-- `google.enabled` (bool): 是否启用Google。
-- `bing.enabled` (bool): 是否启用Bing。
+- `google.enabled` (bool): 是否启用 Google。
+- `bing.enabled` (bool): 是否启用 Bing。
 - `sogou.enabled` (bool): 是否启用搜狗。
+- `duckduckgo.enabled` (bool): 是否启用 DuckDuckGo。
+- `tavily.enabled` (bool): 是否启用 Tavily（需要提供 API key）。
+- `tavily.api_key` (str): Tavily API key，可留空并通过环境变量 `TAVILY_API_KEY` 读取。
+- `tavily.include_answer` (bool): 是否直接使用 Tavily 返回的汇总答案（默认开启，不再额外抓取网页）。
+- `tavily.include_raw_content` (bool): 是否让 Tavily 返回网页正文片段供总结使用。
+- `tavily.search_depth` (str): 搜索深度，可选 `basic` 或 `advanced`。
+- `tavily.topic` (str): Tavily 的主题参数，例如 `general` 或 `news`。
+- `tavily.turbo` (bool): 是否开启 Tavily Turbo 模式。
 - ... 其他特定引擎的参数。
 
 ## 使用说明
@@ -81,6 +91,7 @@ pip install -r requirements.txt
 
 
 ---
+
 
 
 
