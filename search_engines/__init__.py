@@ -8,6 +8,7 @@ from .base import BaseSearchEngine, SearchResult
 from .google import GoogleEngine
 from .bing import BingEngine
 from .sogou import SogouEngine
+from .tavily import TavilyEngine
 
 __all__ = [
     "BaseSearchEngine",
@@ -15,4 +16,5 @@ __all__ = [
     "GoogleEngine",
     "BingEngine",
     "SogouEngine",
+    "TavilyEngine",
 ]
