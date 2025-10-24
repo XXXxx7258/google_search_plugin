@@ -321,7 +321,7 @@ class WebSearchTool(BaseTool):
             if not is_enabled:
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
                 continue
-            if engine_name == "tavily" and not getattr(self.tavily, "has_api_keys", lambda: False)():
+            if engine_name == "tavily" and not (hasattr(self.tavily, "has_api_keys") and self.tavily.has_api_keys()):
                 logger.info("Tavily 搜索未配置 API key，跳过调用")
                 continue
                 
