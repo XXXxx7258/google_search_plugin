@@ -36,6 +36,7 @@ from .search_engines.google import GoogleEngine
 from .search_engines.bing import BingEngine
 from .search_engines.sogou import SogouEngine
 from .search_engines.duckduckgo import DuckDuckGoEngine
+from .search_engines.tavily import TavilyEngine
 
 # 导入翻译工具
 from .tools.abbreviation_tool import AbbreviationTool
@@ -58,8 +59,10 @@ class WebSearchTool(BaseTool):
     bing: BingEngine
     sogo: SogouEngine
     duckduckgo: DuckDuckGoEngine
+    tavily: TavilyEngine
     model_config: Dict[str, Any]
     backend_config: Dict[str, Any]
+    last_success_engine: Optional[str]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -82,11 +85,15 @@ class WebSearchTool(BaseTool):
         bing_config = {**engines_config.get("bing", {}), **common_config}
         sogou_config = {**engines_config.get("sogou", {}), **common_config}
         duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
+        tavily_config = {**engines_config.get("tavily", {}), **common_config}
 
         self.google = GoogleEngine(google_config)
         self.bing = BingEngine(bing_config)
         self.sogo = SogouEngine(sogou_config)
         self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
+        self.tavily = TavilyEngine(tavily_config)
+        self.last_success_engine = None
+        self.last_tavily_answer: Optional[str] = None
         
         # 存储配置供后续使用
         self.model_config = config.get("model_config", {})
@@ -114,14 +121,7 @@ class WebSearchTool(BaseTool):
             return {"name": self.name, "content": f"搜索失败: {str(e)}"}
 
     async def _execute_model_driven_search(self, question: str) -> str:
-        """执行模型驱动的智能搜索流程
-        
-        Args:
-            question: 用户提出的问题
-            
-        Returns:
-            搜索结果的总结文本
-        """
+        """执行模型驱动的智能搜索流程"""
         # 1. 获取全局上下文
         time_gap = self.model_config.get("context_time_gap", 300)
         max_limit = self.model_config.get("context_max_limit", 15)
@@ -132,36 +132,40 @@ class WebSearchTool(BaseTool):
         )
         context_str = message_api.build_readable_messages_to_str(context_messages)
 
-        # 2. 构建查询重写Prompt
+        # 2. 构建查询重写 Prompt
         rewrite_prompt = self._build_rewrite_prompt(question, context_str)
-        
-        # 3. 调用LLM进行查询重写
+
+        # 3. 调用 LLM 进行查询重写
         logger.info("调用LLM进行查询重写...")
         rewritten_query = await self._call_llm(rewrite_prompt)
         if not rewritten_query or "无需搜索" in rewritten_query:
             logger.info("模型判断无需搜索或无法生成搜索词。")
             return rewritten_query or "根据上下文分析，我无法确定需要搜索的具体内容。"
-        
+
         logger.info(f"模型重写后的搜索查询: {rewritten_query}")
 
         # 4. 执行后端搜索
+        self.last_success_engine = None
+        self.last_tavily_answer = None
         max_results = self.backend_config.get("max_results", 10)
         search_results = await self._search_with_fallback(rewritten_query, max_results)
 
         if not search_results:
             return f"关于「{rewritten_query}」，我没有找到相关的网络信息。"
 
-        # 5. (可选) 抓取内容
-        if self.backend_config.get("fetch_content", True):
+        # 5. (可选) 使用 Tavily 结果或执行抓取
+        if self.last_success_engine == "tavily":
+            self._integrate_inline_content(search_results)
+        elif self.backend_config.get("fetch_content", True):
             search_results = await self._fetch_content_for_results(search_results)
 
-        # 6. 构建总结Prompt
+        # 6. 构建总结 Prompt
         summarize_prompt = self._build_summarize_prompt(question, rewritten_query, search_results)
 
-        # 7. 调用LLM进行总结
+        # 7. 调用 LLM 进行总结
         logger.info("调用LLM对搜索结果进行总结...")
         final_answer = await self._call_llm(summarize_prompt)
-        
+
         return final_answer
 
     async def _call_llm(self, prompt: str) -> str:
@@ -293,23 +297,32 @@ class WebSearchTool(BaseTool):
         default_engine = self.backend_config.get("default_engine", "google")
         
         # 定义搜索引擎顺序
-        engine_order = []
-        if default_engine == "google":
-            engine_order = [("google", self.google), ("bing", self.bing), ("duckduckgo", self.duckduckgo), ("sogou", self.sogo)]
-        elif default_engine == "bing":
-            engine_order = [("bing", self.bing), ("google", self.google), ("duckduckgo", self.duckduckgo), ("sogou", self.sogo)]
-        elif default_engine == "sogou":
-            engine_order = [("sogou", self.sogo), ("google", self.google), ("bing", self.bing), ("duckduckgo", self.duckduckgo)]
-        elif default_engine == "duckduckgo":
-            engine_order = [("duckduckgo", self.duckduckgo), ("google", self.google), ("bing", self.bing), ("sogou", self.sogo)]
+        all_engines = [
+            ("tavily", self.tavily),
+            ("google", self.google),
+            ("bing", self.bing),
+            ("duckduckgo", self.duckduckgo),
+            ("sogou", self.sogo),
+        ]
+        if default_engine in dict(all_engines):
+            engine_order = [pair for pair in all_engines if pair[0] == default_engine]
+            engine_order.extend(pair for pair in all_engines if pair[0] != default_engine)
+        else:
+            engine_order = all_engines
         
         # 按顺序尝试搜索引擎
         for engine_name, engine in engine_order:
             # 检查引擎是否启用
             # 从 engines 配置节点下读取引擎配置
             engine_specific_config = self.plugin_config.get("engines", {}).get(engine_name, {})
-            if not engine_specific_config.get("enabled", True):
+            is_enabled = engine_specific_config.get("enabled")
+            if is_enabled is None:
+                is_enabled = engine_name != "tavily"
+            if not is_enabled:
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
+                continue
+            if engine_name == "tavily" and not getattr(self.tavily, "api_key", ""):
+                logger.info("Tavily 搜索未配置 API key，跳过调用")
                 continue
                 
             try:
@@ -317,6 +330,11 @@ class WebSearchTool(BaseTool):
                 results = await engine.search(query, num_results)
                 if results:
                     logger.info(f"{engine_name} 搜索成功，返回 {len(results)} 条结果")
+                    self.last_success_engine = engine_name
+                    if engine_name == "tavily":
+                        self.last_tavily_answer = getattr(engine, "last_answer", None)
+                    else:
+                        self.last_tavily_answer = None
                     return results
             except Exception as e:
                 logger.warning(f"{engine_name} 搜索失败: {e}")
@@ -533,6 +551,34 @@ class WebSearchTool(BaseTool):
                         content_idx += 1
         
         return results
+
+    def _integrate_inline_content(self, results: List[SearchResult]) -> None:
+        """Integrate Tavily-provided content without extra crawling."""
+        if not results:
+            return
+
+        if self.last_tavily_answer:
+            summarized = self.last_tavily_answer.strip()
+            if summarized:
+                answer_result = SearchResult(
+                    title="Tavily Summary",
+                    url="",
+                    snippet=summarized,
+                    abstract=summarized,
+                    rank=-1,
+                    content=summarized,
+                )
+                results.insert(0, answer_result)
+
+        for result in results:
+            content = (result.content or "").strip()
+            if not content:
+                continue
+            if result.abstract:
+                if content not in result.abstract:
+                    result.abstract = f"{result.abstract}\n{content}"
+            else:
+                result.abstract = content
     
     def _format_results(self, results: List[SearchResult]) -> str:
         """格式化搜索结果
@@ -730,7 +776,7 @@ class google_search_simple(BasePlugin):
             },
         },
         "search_backend": {
-            "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou/duckduckgo)"),
+            "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)"),
             "max_results": ConfigField(type=int, default=10, description="默认返回结果数量"),
             "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
             "proxy": ConfigField(type=str, default="", description="用于搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。如果留空则不使用代理。"),
@@ -772,10 +818,19 @@ class google_search_simple(BasePlugin):
             },
             "duckduckgo": {
                 "enabled": ConfigField(type=bool, default=True, description="是否启用DDGS元搜索引擎"),
-                "region": ConfigField(type=str, default="wt-wt", description="搜索区域代码, 例如 'us-en', 'cn-zh' 等"),
-                "backend": ConfigField(type=str, default="auto", description="使用的后端。'auto'表示自动选择，也可以指定多个，如 'duckduckgo,google,brave'"),
+                "region": ConfigField(type=str, default="wt-wt", description="搜索区域代码，例如 'us-en' 或 'cn-zh'"),
+                "backend": ConfigField(type=str, default="auto", description="使用的后端。'auto' 表示自动选择，也可以指定多个，如 'duckduckgo,google,brave'"),
                 "safesearch": ConfigField(type=str, default="moderate", choices=["on", "moderate", "off"], description="安全搜索级别"),
                 "timelimit": ConfigField(type=str, default="", description="时间限制 (d, w, m, y)"),
+            },
+            "tavily": {
+                "enabled": ConfigField(type=bool, default=False, description="是否启用 Tavily 搜索"),
+                "api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
+                "search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
+                "include_raw_content": ConfigField(type=bool, default=True, description="是否返回网页原始内容"),
+                "include_answer": ConfigField(type=bool, default=True, description="是否返回 Tavily 生成的答案"),
+                "topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'"),
+                "turbo": ConfigField(type=bool, default=False, description="是否启用 Tavily Turbo 模式"),
             },
         }
     }
