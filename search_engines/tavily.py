@@ -150,21 +150,23 @@ class TavilyEngine(BaseSearchEngine):
                 cleaned = value.strip()
                 return [cleaned] if cleaned else []
             if isinstance(value, (list, tuple, set)):
-                items: List[str] = []
-                for item in value:
-                    if isinstance(item, str):
-                        cleaned = item.strip()
-                        if cleaned:
-                            items.append(cleaned)
-                return items
+                return [item.strip() for item in value if isinstance(item, str) and item.strip()]
             return []
 
-        candidates: List[str] = []
-        candidates.extend(_collect(self.config.get("api_keys")))
-        candidates.extend(_collect(self.config.get("api_key")))
-        candidates.extend(_collect(os.environ.get("TAVILY_API_KEY")))
+        candidates: List[str] = (
+            _collect(self.config.get("api_keys"))
+            + _collect(self.config.get("api_key"))
+            + _collect(os.environ.get("TAVILY_API_KEY"))
+        )
 
-        return list(dict.fromkeys(candidates))
+        seen = set()
+        unique_keys: List[str] = []
+        for key in candidates:
+            if key and key not in seen:
+                seen.add(key)
+                unique_keys.append(key)
+
+        return unique_keys
 
     def _pick_api_key(self) -> Optional[str]:
         """Randomly select one Tavily API key to use for the request."""
