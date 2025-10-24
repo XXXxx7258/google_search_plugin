@@ -17,7 +17,6 @@ class TavilyEngine(BaseSearchEngine):
     BASE_URL = "https://api.tavily.com"
     SEARCH_ENDPOINT = "/search"
 
-    api_key: Optional[str]
     search_depth: str
     include_raw_content: bool
     include_answer: bool
@@ -27,7 +26,6 @@ class TavilyEngine(BaseSearchEngine):
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         self.api_keys = self._load_api_keys()
-        self.api_key = self.api_keys[0] if self.api_keys else ""
         self.search_depth = self.config.get("search_depth", "basic")
         self.include_raw_content = self.config.get("include_raw_content", True)
         self.include_answer = self.config.get("include_answer", True)
