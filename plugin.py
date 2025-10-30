@@ -108,24 +108,16 @@ class WebSearchTool(BaseTool):
         Returns:
             包含 'name' 和 'content' 键的结果字典
         """
-        question = function_args.get("question", "").strip()
+        question = function_args.get("question", "")
+        question = question.strip()
         if not question:
             return {"name": self.name, "content": "问题为空，无法执行搜索。"}
 
         try:
-            # 首先尝试从文本中提取URL
-            extracted_url = self._extract_url_from_text(question)
-            
-            if extracted_url:
-                # 如果提取到URL，直接访问并总结
-                logger.info(f"从输入中提取到URL，直接访问并总结: {extracted_url}")
-                result_content = await self._execute_direct_url_summary(extracted_url)
-            elif self._is_url(question):
-                # 如果整个问题就是一个URL
+            if self._is_url(question):
                 logger.info(f"检测到URL输入，直接访问并总结: {question}")
                 result_content = await self._execute_direct_url_summary(question)
             else:
-                # 否则执行正常的搜索流程
                 logger.info(f"开始执行搜索，原始问题: {question}")
                 result_content = await self._execute_model_driven_search(question)
             return {"name": self.name, "content": result_content}
@@ -134,116 +126,57 @@ class WebSearchTool(BaseTool):
             return {"name": self.name, "content": f"搜索失败: {str(e)}"}
 
     def _is_url(self, text: str) -> bool:
-        """检测文本是否为URL
-        
-        Args:
-            text: 待检测的文本
-            
-        Returns:
-            True 如果文本是URL，否则 False
-        """
-        # URL 模式匹配
-        url_pattern = re.compile(
-            r'^https?://'  # http:// 或 https://
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # 域名
-            r'localhost|'  # localhost
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP
-            r'(?::\d+)?'  # 可选端口
-            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-        
-        return bool(url_pattern.match(text.strip()))
-    
-    def _extract_url_from_text(self, text: str) -> Optional[str]:
-        """从文本中提取URL
-        
-        当用户输入包含URL的句子时（如"看看这个网页 https://example.com 主要讲了什么"），
-        提取出其中的URL用于直接访问。
-        
-        Args:
-            text: 可能包含URL的文本
-            
-        Returns:
-            提取到的URL，如果没有找到则返回None
-        """
-        # URL 提取模式 - 可以匹配文本中任意位置的URL
-        url_pattern = re.compile(
-            r'https?://'  # http:// 或 https://
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # 域名
-            r'localhost|'  # localhost
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP
-            r'(?::\d+)?'  # 可选端口
-            r'(?:/[^\s]*)?',  # 路径（非空白字符）
-            re.IGNORECASE
-        )
-        
-        match = url_pattern.search(text)
-        if match:
-            url = match.group(0)
-            logger.debug(f"从文本中提取到URL: {url}")
-            return url
-        
-        return None
-    
+        """检测文本是否为URL"""
+        if not text:
+            return False
+        candidate = text.strip()
+        if " " in candidate:
+            return False
+        try:
+            parsed = urlparse(candidate)
+        except ValueError:
+            return False
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return False
+        if not parsed.netloc:
+            return False
+        return True
+
     async def _execute_direct_url_summary(self, url: str) -> str:
-        """直接访问URL并对其内容进行总结
-        
-        Args:
-            url: 要访问的URL
-            
-        Returns:
-            总结后的内容
-        """
+        """直接访问URL并总结其内容"""
         logger.info(f"开始直接访问URL: {url}")
-        
-        # 1. 抓取网页内容
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(trust_env=True) as session:
             content = await self._fetch_page_content(session, url)
-        
+
         if not content:
             return f"无法访问该网页或提取内容: {url}"
-        
+
         logger.info(f"成功抓取网页内容，长度: {len(content)}")
-        
-        # 2. 构建总结提示词
         summarize_prompt = self._build_url_summarize_prompt(url, content)
-        
-        # 3. 调用 LLM 进行总结
         logger.info("调用LLM对网页内容进行总结...")
         final_answer = await self._call_llm(summarize_prompt)
-        
         return final_answer
-    
+
     def _build_url_summarize_prompt(self, url: str, content: str) -> str:
-        """构建URL内容总结提示词
-        
-        Args:
-            url: 网页URL
-            content: 网页内容
-            
-        Returns:
-            格式化的提示词
-        """
-        return f"""
-[任务]
-你是一个专业的内容总结专家。用户提供了一个网页链接，你的任务是阅读这个网页的内容，并提供一个全面、准确、结构清晰的总结。
-
-[网页URL]
-{url}
-
-[网页内容]
-{content[:8000]}  # 限制内容长度以避免超出token限制
-
-[要求]
-1. 提供网页的主要内容概述
-2. 如果是文章，总结其核心观点和关键信息
-3. 如果是产品页面，说明产品的主要特性和用途
-4. 如果是新闻，说明事件的关键要素（何时、何地、何人、何事、为何）
-5. 保持客观中立，不要添加主观评价
-6. 使用清晰的结构和层次组织信息
-7. 如果内容过于简短或无实质信息，请说明
-
-[你的总结]
-"""
+        """构建网页内容总结提示词"""
+        truncated_content = content[:8000]
+        return (
+            "[任务]\n"
+            "你是一个专业的内容总结专家。用户提供了一个网页链接，你的任务是阅读这个网页的内容，并提供一个全面、准确、结构清晰的总结。\n\n"
+            "[网页URL]\n"
+            f"{url}\n\n"
+            "[网页内容]\n"
+            f"{truncated_content}\n\n"
+            "[要求]\n"
+            "1. 提供网页的主要内容概述\n"
+            "2. 如果是文章，总结其核心观点和关键信息\n"
+            "3. 如果是产品页面，说明产品的主要特性和用途\n"
+            "4. 如果是新闻，说明事件的关键要素（何时、何地、何人、何事、为何）\n"
+            "5. 保持客观中立，不要添加主观评价\n"
+            "6. 使用清晰的结构和层次组织信息\n"
+            "7. 如果内容过于简短或无实质信息，请说明\n\n"
+            "[你的总结]\n"
+        )
 
     async def _execute_model_driven_search(self, question: str) -> str:
         """执行模型驱动的智能搜索流程"""
