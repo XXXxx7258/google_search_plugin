@@ -13,6 +13,53 @@ class BingEngine(BaseSearchEngine):
     region: str
     setlang: str
     count: int
+
+    SELECTOR_CONFIG: Dict[str, Dict[str, Any]] = {
+        "url": {
+            "primary": "h2 > a",
+            "fallback": [
+                "h2 a",
+                "h3 > a",
+                ".b_algo h2 a",
+                ".b_algo a[href]",
+            ],
+        },
+        "title": {
+            "primary": "h2 > a",
+            "fallback": [
+                "h2 a",
+                "h3 > a",
+                ".b_algo h2 a",
+                ".b_algo a[href]",
+            ],
+        },
+        "text": {
+            "primary": ".b_caption > p",
+            "fallback": [
+                ".b_caption",
+                ".b_descript",
+                ".b_snippet",
+                ".b_algo .b_caption",
+            ],
+        },
+        "links": {
+            "primary": "ol#b_results > li.b_algo",
+            "fallback": [
+                "#b_results > li.b_algo",
+                "#b_results li.b_algo",
+                ".b_algo",
+                "li.b_algo",
+            ],
+        },
+        "next": {
+            "primary": 'div#b_content nav[role="navigation"] a.sb_pagN',
+            "fallback": [
+                'nav[role="navigation"] a.sb_pagN',
+                'a.sb_pagN',
+                '.sb_pagN',
+            ],
+        },
+    }
     
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
@@ -30,49 +77,8 @@ class BingEngine(BaseSearchEngine):
         Returns:
             CSS选择器字符串
         """
-        # 主选择器配置（经过测试验证有效）
-        primary_selectors = {
-            "url": "h2 > a",
-            "title": "h2 > a",
-            "text": ".b_caption > p",
-            "links": "ol#b_results > li.b_algo",
-            "next": 'div#b_content nav[role="navigation"] a.sb_pagN',
-        }
-
-        # 备用选择器配置（万一主选择器失效）
-        fallback_selectors = {
-            "url": [
-                "h2 a",  # 更宽泛的h2标签下的链接
-                "h3 > a",  # h3标签下的链接
-                ".b_algo h2 a",  # 结果容器内的h2链接
-                ".b_algo a[href]",  # 任何有href属性的链接
-            ],
-            "title": [
-                "h2 a",
-                "h3 > a",
-                ".b_algo h2 a",
-                ".b_algo a[href]",
-            ],
-            "text": [
-                ".b_caption",  # 整个描述区域
-                ".b_descript",  # 可能的替代描述类
-                ".b_snippet",  # 可能的摘要类
-                ".b_algo .b_caption",  # 结果容器内的描述
-            ],
-            "links": [
-                "#b_results > li.b_algo",  # 去掉ol限制
-                "#b_results li.b_algo",  # 更宽泛的匹配
-                ".b_algo",  # 最宽泛的结果项选择器
-                "li.b_algo",  # 只选择li元素
-            ],
-            "next": [
-                'nav[role="navigation"] a.sb_pagN',  # 去掉div限制
-                'a.sb_pagN',  # 最简单的下一页选择器
-                '.sb_pagN',  # 下一页按钮
-            ],
-        }
-
-        return primary_selectors.get(selector, "")
+        config = self.SELECTOR_CONFIG.get(selector, {})
+        return config.get("primary", "")
 
     def _get_fallback_selectors(self, selector: str) -> list:
         """获取备用选择器列表
@@ -83,39 +89,8 @@ class BingEngine(BaseSearchEngine):
         Returns:
             备用选择器列表
         """
-        fallback_selectors = {
-            "url": [
-                "h2 a",
-                "h3 > a",
-                ".b_algo h2 a",
-                ".b_algo a[href]",
-            ],
-            "title": [
-                "h2 a",
-                "h3 > a",
-                ".b_algo h2 a",
-                ".b_algo a[href]",
-            ],
-            "text": [
-                ".b_caption",
-                ".b_descript",
-                ".b_snippet",
-                ".b_algo .b_caption",
-            ],
-            "links": [
-                "#b_results > li.b_algo",
-                "#b_results li.b_algo",
-                ".b_algo",
-                "li.b_algo",
-            ],
-            "next": [
-                'nav[role="navigation"] a.sb_pagN',
-                'a.sb_pagN',
-                '.sb_pagN',
-            ],
-        }
-
-        return fallback_selectors.get(selector, [])
+        config = self.SELECTOR_CONFIG.get(selector, {})
+        return config.get("fallback", [])
 
     async def _get_next_page(self, query: str) -> str:
         """构建并获取搜索页面的HTML内容
