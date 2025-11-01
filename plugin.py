@@ -5,7 +5,8 @@ import time
 import re
 import base64
 import warnings
-from typing import List, Tuple, Type, Dict, Any, Optional, Union
+from collections import deque
+from typing import List, Tuple, Type, Dict, Any, Optional, Union, Deque
 from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
 from dataclasses import dataclass
 
@@ -698,6 +699,8 @@ class ImageSearchAction(BaseAction):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self._image_history: Dict[str, Deque[str]] = {}
+        self._image_history_max_size: int = 30
         
         # 检查是否启用图片搜索功能
         enabled_value = self.get_config("actions.image_search.enabled", False)
@@ -718,6 +721,10 @@ class ImageSearchAction(BaseAction):
         duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
         self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
         self.backend_config = config.get("search_backend", {})
+        max_results = self.backend_config.get("max_results")
+        if isinstance(max_results, int) and max_results > 0:
+            # 允许缓存比配置更多的结果，以便轮换图片
+            self._image_history_max_size = max(10, max_results * 3)
 
     async def execute(self) -> Tuple[bool, str]:
         """执行图片搜索并直接发送图片
@@ -749,14 +756,31 @@ class ImageSearchAction(BaseAction):
                 await self.send_text(f"我没找到关于「{query}」的图片呢。", set_reply=True, reply_message=self.action_message)
                 return False, "未找到图片"
 
-            # 过滤掉None值，确保类型安全
-            image_urls: List[str] = [
-                url for item in image_results
-                if (url := item.get('image')) is not None
-            ]
+            # 过滤掉None值和重复项，确保类型安全
+            image_urls: List[str] = []
+            seen_urls: set[str] = set()
+            for item in image_results:
+                url = item.get('image')
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                image_urls.append(url)
             if not image_urls:
                 await self.send_text("虽然找到了结果，但好像没有有效的图片地址。", set_reply=True, reply_message=self.action_message)
                 return False, "无有效图片地址"
+
+            history = self._image_history.get(query)
+            if history is None:
+                history = deque(maxlen=self._image_history_max_size)
+                self._image_history[query] = history
+
+            candidate_urls = [url for url in image_urls if url not in history]
+            if not candidate_urls:
+                history.clear()
+                candidate_urls = image_urls
+                ordered_urls = candidate_urls
+            else:
+                ordered_urls = candidate_urls + [url for url in image_urls if url not in candidate_urls]
 
             async def _fetch_image(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
                 try:
@@ -769,7 +793,7 @@ class ImageSearchAction(BaseAction):
 
             # 尝试下载并发送第一张成功的图片
             async with aiohttp.ClientSession(trust_env=True) as session:
-                for url in image_urls:
+                for url in ordered_urls:
                     if not url:  # 额外的安全检查
                         continue
                     image_data = await _fetch_image(session, url)
@@ -779,9 +803,11 @@ class ImageSearchAction(BaseAction):
                         # 发送图片
                         success = await self.send_image(b64_data, set_reply=True, reply_message=self.action_message)
                         if success:
+                            history.append(url)
                             logger.info(f"成功发送了关于「{query}」的图片。")
                             return True, "图片发送成功"
                         else:
+                            history.append(url)
                             logger.error("调用 send_image 失败。")
                             # 即使发送失败也停止，避免发送多张
                             await self.send_text("我下载好了图片，但是发送失败了...", set_reply=True, reply_message=self.action_message)
