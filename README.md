@@ -15,7 +15,7 @@
 为了确保插件正常工作，您需要安装Python依赖。**在你的麦麦的运行环境**中于**本插件**的根目录下执行以下命令即可：
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 ```
 如果是uv安装，在pip前面加上uv即可，如uv pip install -r requirements.txt
@@ -92,6 +92,7 @@ pip install -r requirements.txt
 
 
 ---
+
 
 
 
