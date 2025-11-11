@@ -18,7 +18,7 @@
 pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 ```
-如果是uv安装，在pip前面加上uv即可，如uv pip install -r requirements.txt
+如果是uv安装，在pip前面加上uv即可，如uv pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 注意：**一键包**用户在“点我启动！！！.bat”后选择"11. 交互式安装pip模块",在其中输入requirements.txt的路径即可！（如："E:\Downloads\MaiBotOneKey\modules\MaiBot\plugins\google_search_plugin\requirements.txt"）
 
@@ -92,6 +92,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 
 ---
+
 
 
 
