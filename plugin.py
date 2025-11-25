@@ -3,6 +3,7 @@ import asyncio
 import random
 import time
 import re
+import json
 import base64
 import warnings
 from collections import deque
@@ -18,6 +19,8 @@ from readability import Document
 warnings.filterwarnings("ignore", message=".*ruthless removal.*")
 
 from src.common.logger import get_logger
+from src.common.database.database_model import ChatHistory
+from src.chat.utils.utils import parse_keywords_string
 from src.plugin_system import (
     BasePlugin,
     register_plugin,
@@ -156,6 +159,16 @@ class WebSearchTool(BaseTool):
         summarize_prompt = self._build_url_summarize_prompt(url, content)
         logger.info("调用LLM对网页内容进行总结...")
         final_answer = await self._call_llm(summarize_prompt)
+        try:
+            self._record_search_history(
+                original_question=url,
+                search_query=url,
+                results=[SearchResult(title=url, url=url, snippet=content[:200] if content else "")],
+                final_answer=final_answer,
+                source_type="direct_url",
+            )
+        except Exception as e:
+            logger.error(f"记录搜索结果时异常: {e}")
         return final_answer
 
     def _build_url_summarize_prompt(self, url: str, content: str) -> str:
@@ -225,6 +238,17 @@ class WebSearchTool(BaseTool):
         logger.info("调用LLM对搜索结果进行总结...")
         final_answer = await self._call_llm(summarize_prompt)
 
+        try:
+            self._record_search_history(
+                original_question=question,
+                search_query=rewritten_query,
+                results=search_results,
+                final_answer=final_answer,
+                source_type="search",
+            )
+        except Exception as e:
+            logger.error(f"记录搜索结果时异常: {e}")
+
         return final_answer
 
     async def _call_llm(self, prompt: str) -> str:
@@ -271,6 +295,116 @@ class WebSearchTool(BaseTool):
         except Exception as e:
             logger.error(f"调用LLM API时出错: {e}")
             return f"在处理信息时遇到了一个内部错误: {e}"
+
+    def _record_search_history(
+        self,
+        original_question: str,
+        search_query: str,
+        results: List[SearchResult],
+        final_answer: str,
+        source_type: str,
+    ) -> None:
+        """将搜索结果写入 chat_history，供记忆检索复用"""
+        if not self.chat_id:
+            return
+        if not self.get_config("storage.enable_store", True):
+            return
+
+        try:
+            now_ts = time.time()
+            theme = f"Web搜索: {search_query or original_question}"
+            dedup_window = self.get_config("storage.dedup_window_seconds", 600)
+            if dedup_window:
+                existing = (
+                    ChatHistory.select()
+                    .where(
+                        (ChatHistory.chat_id == self.chat_id)
+                        & (ChatHistory.theme == theme)
+                        & (ChatHistory.start_time >= now_ts - dedup_window)
+                    )
+                    .order_by(ChatHistory.start_time.desc())
+                )
+                if existing.exists():
+                    return
+
+            top_k = self.get_config("storage.store_top_k", 5)
+            keywords = self._extract_keywords(search_query or original_question)
+            results_summary = self._format_results_summary(results, top_k)
+            summary = results_summary or (final_answer[:500] if final_answer else "")
+
+            serialized_results = self._serialize_results(results, top_k)
+            original_text_parts = [
+                f"source_type: {source_type}",
+                f"original_question: {original_question}",
+                f"search_query: {search_query}",
+                f"engine: {self.last_success_engine or 'unknown'}",
+                f"final_answer: {final_answer or ''}",
+                f"results_json: {json.dumps(serialized_results, ensure_ascii=False)}",
+            ]
+            original_text = "\n".join(original_text_parts)
+
+            ChatHistory.create(
+                chat_id=self.chat_id,
+                start_time=now_ts,
+                end_time=now_ts,
+                original_text=original_text,
+                participants="web_search_plugin",
+                theme=theme,
+                keywords=json.dumps(keywords, ensure_ascii=False) if keywords else json.dumps([], ensure_ascii=False),
+                summary=summary or "网络搜索结果已记录",
+            )
+            logger.info(f"已写入搜索结果到 chat_history，主题: {theme}")
+        except Exception as e:
+            logger.error(f"记录搜索历史失败: {e}")
+
+    def _extract_keywords(self, text: str) -> List[str]:
+        if not text:
+            return []
+        try:
+            kws = parse_keywords_string(text)
+            if kws:
+                return kws
+        except Exception:
+            pass
+        try:
+            return [kw for kw in re.split(r"[\\s,;/]+", text) if kw]
+        except Exception:
+            return []
+
+    def _format_results_summary(self, results: List[SearchResult], top_k: int) -> str:
+        if not results:
+            return ""
+        lines: List[str] = []
+        for item in results[:top_k]:
+            if not item:
+                continue
+            title = getattr(item, "title", "") or ""
+            url = getattr(item, "url", "") or ""
+            snippet = getattr(item, "snippet", "") or getattr(item, "abstract", "") or ""
+            if title or url:
+                lines.append(f"{title} - {url}".strip(" -"))
+            if snippet:
+                lines.append(f"摘要：{snippet}")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    def _serialize_results(self, results: List[SearchResult], top_k: int) -> List[Dict[str, str]]:
+        serialized: List[Dict[str, str]] = []
+        if not results:
+            return serialized
+        for item in results[:top_k]:
+            if not item:
+                continue
+            serialized.append(
+                {
+                    "title": getattr(item, "title", "") or "",
+                    "url": getattr(item, "url", "") or "",
+                    "snippet": getattr(item, "snippet", "") or "",
+                    "abstract": getattr(item, "abstract", "") or "",
+                    "content": getattr(item, "content", "") or "",
+                }
+            )
+        return serialized
 
     def _build_rewrite_prompt(self, question: str, context: str) -> str:
         """构建用于查询重写的Prompt
