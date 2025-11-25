@@ -998,8 +998,8 @@ class google_search_simple(BasePlugin):
             },
         },
         "search_backend": {
-            "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)"),
-            "max_results": ConfigField(type=int, default=10, description="默认返回结果数量"),
+            "default_engine": ConfigField(type=str, default="bing", description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)"),
+            "max_results": ConfigField(type=int, default=15, description="默认返回结果数量"),
             "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
             "proxy": ConfigField(type=str, default="", description="用于搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。如果留空则不使用代理。"),
             "fetch_content": ConfigField(type=bool, default=True, description="是否抓取网页内容"),
@@ -1028,7 +1028,7 @@ class google_search_simple(BasePlugin):
         },
         "engines": {
             "google": {
-                "enabled": ConfigField(type=bool, default=True, description="是否启用Google搜索"),
+                "enabled": ConfigField(type=bool, default=False, description="是否启用Google搜索"),
                 "language": ConfigField(type=str, default="zh-cn", description="搜索语言"),
             },
             "bing": {
@@ -1050,7 +1050,7 @@ class google_search_simple(BasePlugin):
                 "api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时随机选取一个使用"),
                 "api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
                 "search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
-                "include_raw_content": ConfigField(type=bool, default=True, description="是否返回网页原始内容"),
+                "include_raw_content": ConfigField(type=bool, default=False, description="是否返回网页原始内容"),
                 "include_answer": ConfigField(type=bool, default=True, description="是否返回 Tavily 生成的答案"),
                 "topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'"),
                 "turbo": ConfigField(type=bool, default=False, description="是否启用 Tavily Turbo 模式"),
