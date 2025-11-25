@@ -370,7 +370,8 @@ class WebSearchTool(BaseTool):
         except Exception:
             pass
         try:
-            return [kw for kw in re.split("[\\s,;/]+", text) if kw]
+            # 按空白、逗号、分号、斜杠拆分关键词
+            return [kw for kw in re.split(r"[\\s,;/]+", text) if kw]
         except Exception:
             return []
 
