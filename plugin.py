@@ -325,9 +325,12 @@ class WebSearchTool(BaseTool):
             keywords = self._extract_keywords(search_query or original_question)
             results_summary = self._format_results_summary(results, top_k)
             final_answer_text = (final_answer or "").strip()
-            summary = final_answer_text or results_summary or ""
             if final_answer_text and results_summary:
                 summary = f"{final_answer_text}\n\n---\n\n{results_summary}"
+            elif final_answer_text:
+                summary = final_answer_text
+            else:
+                summary = results_summary or ""
 
             # 控制 original_text 中最终回答的长度，避免占用过大
             final_answer_for_text = final_answer_text
