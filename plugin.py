@@ -159,16 +159,13 @@ class WebSearchTool(BaseTool):
         summarize_prompt = self._build_url_summarize_prompt(url, content)
         logger.info("调用LLM对网页内容进行总结...")
         final_answer = await self._call_llm(summarize_prompt)
-        try:
-            self._record_search_history(
-                original_question=url,
-                search_query=url,
-                results=[SearchResult(title=url, url=url, snippet=content[:200] if content else "")],
-                final_answer=final_answer,
-                source_type="direct_url",
-            )
-        except Exception as e:
-            logger.error(f"记录搜索结果时异常: {e}")
+        self._record_search_history(
+            original_question=url,
+            search_query=url,
+            results=[SearchResult(title=url, url=url, snippet=content[:200] if content else "")],
+            final_answer=final_answer,
+            source_type="direct_url",
+        )
         return final_answer
 
     def _build_url_summarize_prompt(self, url: str, content: str) -> str:
@@ -238,16 +235,13 @@ class WebSearchTool(BaseTool):
         logger.info("调用LLM对搜索结果进行总结...")
         final_answer = await self._call_llm(summarize_prompt)
 
-        try:
-            self._record_search_history(
-                original_question=question,
-                search_query=rewritten_query,
-                results=search_results,
-                final_answer=final_answer,
-                source_type="search",
-            )
-        except Exception as e:
-            logger.error(f"记录搜索结果时异常: {e}")
+        self._record_search_history(
+            original_question=question,
+            search_query=rewritten_query,
+            results=search_results,
+            final_answer=final_answer,
+            source_type="search",
+        )
 
         return final_answer
 
@@ -330,7 +324,19 @@ class WebSearchTool(BaseTool):
             top_k = self.get_config("storage.store_top_k", 5)
             keywords = self._extract_keywords(search_query or original_question)
             results_summary = self._format_results_summary(results, top_k)
-            summary = results_summary or (final_answer[:500] if final_answer else "")
+            final_answer_text = (final_answer or "").strip()
+            if final_answer_text and results_summary:
+                summary = f"{final_answer_text}\n\n---\n\n{results_summary}"
+            elif final_answer_text:
+                summary = final_answer_text
+            else:
+                summary = results_summary or ""
+
+            # 控制 original_text 中最终回答的长度，避免占用过大
+            final_answer_for_text = final_answer_text
+            max_final_len = self.get_config("storage.final_answer_max_len", 1200)
+            if max_final_len and len(final_answer_for_text) > max_final_len:
+                final_answer_for_text = final_answer_for_text[:max_final_len] + "…"
 
             serialized_results = self._serialize_results(results, top_k)
             original_text_parts = [
@@ -338,7 +344,7 @@ class WebSearchTool(BaseTool):
                 f"original_question: {original_question}",
                 f"search_query: {search_query}",
                 f"engine: {self.last_success_engine or 'unknown'}",
-                f"final_answer: {final_answer or ''}",
+                f"final_answer: {final_answer_for_text}",
                 f"results_json: {json.dumps(serialized_results, ensure_ascii=False)}",
             ]
             original_text = "\n".join(original_text_parts)
@@ -367,7 +373,8 @@ class WebSearchTool(BaseTool):
         except Exception:
             pass
         try:
-            return [kw for kw in re.split(r"[\\s,;/]+", text) if kw]
+            # 按空白、逗号、分号、斜杠拆分关键词
+            return [kw for kw in re.split(r"[\s,;/]+", text) if kw]
         except Exception:
             return []
 
@@ -979,7 +986,7 @@ class google_search_simple(BasePlugin):
     config_schema: Dict[str, Dict[str, Union[ConfigField, Dict]]] = {
         "plugin": {
             "name": ConfigField(type=str, default="google_search", description="插件名称"),
-            "version": ConfigField(type=str, default="3.0.0", description="插件版本"),
+            "version": ConfigField(type=str, default="3.1.0", description="插件版本"),
             "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
         },
         "model_config": {
@@ -994,8 +1001,8 @@ class google_search_simple(BasePlugin):
             },
         },
         "search_backend": {
-            "default_engine": ConfigField(type=str, default="google", description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)"),
-            "max_results": ConfigField(type=int, default=10, description="默认返回结果数量"),
+            "default_engine": ConfigField(type=str, default="bing", description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)"),
+            "max_results": ConfigField(type=int, default=15, description="默认返回结果数量"),
             "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
             "proxy": ConfigField(type=str, default="", description="用于搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。如果留空则不使用代理。"),
             "fetch_content": ConfigField(type=bool, default=True, description="是否抓取网页内容"),
@@ -1024,7 +1031,7 @@ class google_search_simple(BasePlugin):
         },
         "engines": {
             "google": {
-                "enabled": ConfigField(type=bool, default=True, description="是否启用Google搜索"),
+                "enabled": ConfigField(type=bool, default=False, description="是否启用Google搜索"),
                 "language": ConfigField(type=str, default="zh-cn", description="搜索语言"),
             },
             "bing": {
@@ -1046,12 +1053,22 @@ class google_search_simple(BasePlugin):
                 "api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时随机选取一个使用"),
                 "api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
                 "search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
-                "include_raw_content": ConfigField(type=bool, default=True, description="是否返回网页原始内容"),
+                "include_raw_content": ConfigField(type=bool, default=False, description="是否返回网页原始内容"),
                 "include_answer": ConfigField(type=bool, default=True, description="是否返回 Tavily 生成的答案"),
                 "topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'"),
                 "turbo": ConfigField(type=bool, default=False, description="是否启用 Tavily Turbo 模式"),
             },
-        }
+        },
+        "storage": {
+            "enable_store": ConfigField(type=bool, default=True, description="是否将搜索结果写入 chat_history"),
+            "store_top_k": ConfigField(type=int, default=5, description="每次写入的搜索结果条数上限"),
+            "dedup_window_seconds": ConfigField(type=int, default=600, description="同一主题写入的去重时间窗口（秒），0 表示不去重"),
+            "final_answer_max_len": ConfigField(
+                type=int,
+                default=1200,
+                description="original_text 中 final_answer 的截断长度，0 表示不截断"
+            ),
+        },
     }
     
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
@@ -1176,6 +1193,19 @@ class google_search_simple(BasePlugin):
         if "plugin" in self.config and "enabled" in self.config["plugin"]:
             self.enable_plugin = self.config["plugin"]["enabled"]
             logger.debug(f"{self.log_prefix} 从配置更新插件启用状态: {self.enable_plugin}")
+
+        # 向后兼容：补全新增的 storage 与 plugin.version 默认值
+        if "storage" not in self.config:
+            self.config["storage"] = default_config.get("storage", {})
+        else:
+            # 为缺失的 storage 子项补默认值
+            for k, v in default_config.get("storage", {}).items():
+                self.config["storage"].setdefault(k, v)
+
+        if "plugin" in self.config:
+            self.config["plugin"].setdefault("version", default_config["plugin"]["version"])
+        else:
+            self.config["plugin"] = default_config["plugin"]
 
 
 
