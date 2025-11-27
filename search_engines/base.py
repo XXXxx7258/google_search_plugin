@@ -197,7 +197,7 @@ class BaseSearchEngine:
                             try:
                                 decoded_bytes = base64.b64decode(raw_target[2:] + "===")
                                 decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
-                                match = re.search(r"https?://\S+", decoded_text)
+                                match = re.search(r"https?://[^\s\"'>]+", decoded_text)
                                 raw_target = match.group(0) if match else decoded_text
                             except Exception:
                                 pass
@@ -265,3 +265,4 @@ class BaseSearchEngine:
         except Exception as e:
             logger.error(f"Error in search for query {query}: {e}", exc_info=True)
             return []
+
