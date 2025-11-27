@@ -201,7 +201,7 @@ class BaseSearchEngine:
                                 raw_target = match.group(0) if match else decoded_text
                             except Exception:
                                 pass
-                        url = urllib.parse.unquote(raw_target)
+                        url = raw_target
             except Exception:
                 pass
 
