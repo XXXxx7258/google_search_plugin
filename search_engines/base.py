@@ -1,12 +1,14 @@
 import random
 import warnings
 import logging
+import re
+import base64
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 import aiohttp
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import urllib.parse
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, parse_qs
 
 warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
 logger = logging.getLogger(__name__)
@@ -181,14 +183,31 @@ class BaseSearchEngine:
             return ""
 
         try:
-            # 只对URL进行解码，不对文本内容解码
             url = urllib.parse.unquote(str(url_raw))
 
-            # 如果是相对URL，转换为绝对URL
+            # 处理 Bing 跳转链接 /ck/a?...&u=target
+            try:
+                parsed_raw = urlparse(url)
+                if parsed_raw.netloc.endswith("bing.com") and parsed_raw.path.startswith("/ck/a"):
+                    query_params = parse_qs(parsed_raw.query)
+                    target = query_params.get("u", [])
+                    if target:
+                        raw_target = urllib.parse.unquote(target[0])
+                        if raw_target.startswith("a1"):
+                            try:
+                                decoded_bytes = base64.b64decode(raw_target[2:] + "===")
+                                decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
+                                match = re.search(r"https?://[^\s\"'>]+", decoded_text)
+                                raw_target = match.group(0) if match else decoded_text
+                            except Exception:
+                                pass
+                        url = raw_target
+            except Exception:
+                pass
+
             if base_url and not url.startswith(('http://', 'https://')):
                 url = urljoin(base_url, url)
 
-            # 验证URL有效性
             if self._is_valid_url(url):
                 return url
             else:
@@ -246,3 +265,4 @@ class BaseSearchEngine:
         except Exception as e:
             logger.error(f"Error in search for query {query}: {e}", exc_info=True)
             return []
+
