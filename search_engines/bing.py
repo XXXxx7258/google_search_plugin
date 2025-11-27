@@ -1,6 +1,7 @@
 import logging
+import re
 from typing import List, Dict, Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from .base import BaseSearchEngine, SearchResult
 from bs4 import BeautifulSoup
 
@@ -60,6 +61,8 @@ class BingEngine(BaseSearchEngine):
             ],
         },
     }
+    # 保持空列表，后续可按需加入
+    BLOCKED_DOMAINS: List[str] = []
     
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
@@ -67,6 +70,41 @@ class BingEngine(BaseSearchEngine):
         self.region = self.config.get("region", "zh-CN")
         self.setlang = self.config.get("setlang", "zh")
         self.count = self.config.get("count", 10)
+
+    def _build_keywords(self, query: str) -> List[str]:
+        """构建用于简单相关性过滤的关键词列表"""
+        if not query:
+            return []
+        # 简单拆词，优先提取英文单词与数字
+        pieces: List[str] = []
+        for token in re.split(r"\\s+", query.lower().strip()):
+            if not token:
+                continue
+            words = re.findall(r"[a-z0-9]+", token)
+            if words:
+                pieces.extend(words)
+            else:
+                pieces.append(token)
+        return [p for p in pieces if len(p) >= 2]
+
+    def _is_relevant(self, title: str, snippet: str, url: str, keywords: List[str]) -> bool:
+        """粗粒度过滤：标题/摘要命中足够多的关键词"""
+        if not keywords:
+            return True
+        text = f"{title} {snippet}".lower()
+        match_count = sum(1 for kw in keywords if kw in text)
+        # 放宽：至少命中一个关键词即可
+        return match_count >= 1
+
+    def _is_blocked(self, url: str) -> bool:
+        """域名黑名单过滤"""
+        if not url:
+            return False
+        try:
+            netloc = urlparse(url).netloc.lower()
+        except Exception:
+            return False
+        return any(netloc.endswith(domain) for domain in self.BLOCKED_DOMAINS)
 
     def _set_selector(self, selector: str) -> str:
         """获取页面元素选择器
@@ -92,23 +130,29 @@ class BingEngine(BaseSearchEngine):
         config = self.SELECTOR_CONFIG.get(selector, {})
         return config.get("fallback", [])
 
-    async def _get_next_page(self, query: str) -> str:
-        """构建并获取搜索页面的HTML内容
-
-        Args:
-            query: 搜索查询
-
-        Returns:
-            HTML内容
-        """
-        base_url = self.base_urls[0]
+    async def _get_next_page(
+        self,
+        query: str,
+        *,
+        base_url: Optional[str] = None,
+        region: Optional[str] = None,
+        setlang: Optional[str] = None,
+        market: Optional[str] = None,
+    ) -> str:
+        """构建并获取搜索页面的HTML内容"""
+        base_url = base_url or self.base_urls[0]
+        region = region or self.region
+        setlang = setlang or self.setlang
         params = {
             "q": query,
-            "setlang": self.setlang,
+            "setlang": setlang,
             "count": str(min(self.count, 50)),
+            "ensearch": "1",
         }
-        if self.region:
-            params["cc"] = self.region.split("-")[0] if "-" in self.region else self.region
+        if region:
+            params["cc"] = region.split("-")[0] if "-" in region else region
+        if market:
+            params["mkt"] = market
 
         query_string = urlencode(params)
         search_url = f"{base_url}/search?{query_string}"
@@ -126,67 +170,91 @@ class BingEngine(BaseSearchEngine):
             搜索结果列表
         """
         try:
-            resp = await self._get_next_page(query)
-            soup = BeautifulSoup(resp, "html.parser")
+            keywords = self._build_keywords(query)
+            # 先用默认区域，其次尝试全局英文兜底
+            fetch_variants = [
+                {
+                    "base_url": self.base_urls[0],
+                    "region": self.region,
+                    "setlang": self.setlang,
+                    "market": self.region,
+                },
+                {
+                    "base_url": self.base_urls[1] if len(self.base_urls) > 1 else self.base_urls[0],
+                    "region": "en-US",
+                    "setlang": "en",
+                    "market": "en-US",
+                },
+            ]
 
-            # 使用主选择器查找结果
-            links_selector = self._set_selector("links")
-            links = soup.select(links_selector) if links_selector else []
+            results: List[SearchResult] = []
+            for variant in fetch_variants:
+                resp = await self._get_next_page(query, **variant)
+                soup = BeautifulSoup(resp, "html.parser")
 
-            # 如果主选择器失效，尝试备用选择器
-            if not links:
-                logger.warning(f"Primary links selector '{links_selector}' found no results, trying fallbacks")
-                for fallback_selector in self._get_fallback_selectors("links"):
-                    links = soup.select(fallback_selector)
-                    if links:
-                        logger.info(f"Fallback selector '{fallback_selector}' found {len(links)} results")
-                        break
+                # 使用主选择器查找结果
+                links_selector = self._set_selector("links")
+                links = soup.select(links_selector) if links_selector else []
 
-            if not links:
-                logger.error(f"No results found with any selector for query '{query}'")
-                return []
-
-            logger.info(f"Found {len(links)} link elements")
-
-            results = []
-            title_selector = self._set_selector("title")
-            url_selector = self._set_selector("url")
-            text_selector = self._set_selector("text")
-
-            for idx, link in enumerate(links):
-                # 处理标题，使用备用选择器
-                title_elem = link.select_one(title_selector) if title_selector else None
-                if not title_elem:
-                    for fallback in self._get_fallback_selectors("title"):
-                        title_elem = link.select_one(fallback)
-                        if title_elem:
+                # 如果主选择器失效，尝试备用选择器
+                if not links:
+                    logger.warning(f"Primary links selector '{links_selector}' found no results, trying fallbacks")
+                    for fallback_selector in self._get_fallback_selectors("links"):
+                        links = soup.select(fallback_selector)
+                        if links:
+                            logger.info(f"Fallback selector '{fallback_selector}' found {len(links)} results")
                             break
-                title = self.tidy_text(title_elem.text) if title_elem else ""
 
-                # 处理URL，使用备用选择器
-                url_elem = link.select_one(url_selector) if url_selector else None
-                if not url_elem:
-                    for fallback in self._get_fallback_selectors("url"):
-                        url_elem = link.select_one(fallback)
-                        if url_elem:
-                            break
-                url_raw = url_elem.get("href") if url_elem else ""
-                url = self._normalize_url(url_raw)
+                if not links:
+                    logger.error(f"No results found with any selector for query '{query}' using {variant}")
+                    continue
 
-                # 处理摘要，使用备用选择器
-                snippet = ""
-                if text_selector:
-                    snippet_elem = link.select_one(text_selector)
-                    if not snippet_elem:
-                        for fallback in self._get_fallback_selectors("text"):
-                            snippet_elem = link.select_one(fallback)
-                            if snippet_elem:
+                logger.info(f"Found {len(links)} link elements using {variant}")
+
+                title_selector = self._set_selector("title")
+                url_selector = self._set_selector("url")
+                text_selector = self._set_selector("text")
+
+                for idx, link in enumerate(links):
+                    # 处理标题，使用备用选择器
+                    title_elem = link.select_one(title_selector) if title_selector else None
+                    if not title_elem:
+                        for fallback in self._get_fallback_selectors("title"):
+                            title_elem = link.select_one(fallback)
+                            if title_elem:
                                 break
-                    snippet = self.tidy_text(snippet_elem.text) if snippet_elem else ""
+                    title = self.tidy_text(title_elem.text) if title_elem else ""
 
-                # 只有当标题和URL都有效时才添加结果
-                if title and url:
-                    results.append(SearchResult(title=title, url=url, snippet=snippet, abstract=snippet, rank=idx))
+                    # 处理URL，使用备用选择器
+                    url_elem = link.select_one(url_selector) if url_selector else None
+                    if not url_elem:
+                        for fallback in self._get_fallback_selectors("url"):
+                            url_elem = link.select_one(fallback)
+                            if url_elem:
+                                break
+                    url_raw = url_elem.get("href") if url_elem else ""
+                    url = self._normalize_url(url_raw)
+
+                    # 处理摘要，使用备用选择器
+                    snippet = ""
+                    if text_selector:
+                        snippet_elem = link.select_one(text_selector)
+                        if not snippet_elem:
+                            for fallback in self._get_fallback_selectors("text"):
+                                snippet_elem = link.select_one(fallback)
+                                if snippet_elem:
+                                    break
+                        snippet = self.tidy_text(snippet_elem.text) if snippet_elem else ""
+
+                    # 只有当标题和URL都有效且通过相关性过滤时才添加结果
+                    if title and url and not self._is_blocked(url) and self._is_relevant(title, snippet, url, keywords):
+                        results.append(SearchResult(title=title, url=url, snippet=snippet, abstract=snippet, rank=idx))
+
+                if results:
+                    break
+
+            if not results:
+                logger.warning(f"No relevant results remain after filtering for query '{query}'")
 
             logger.info(f"Returning {len(results[:num_results])} search results for query '{query}'")
             return results[:num_results]
