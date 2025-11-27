@@ -80,7 +80,7 @@ class BingEngine(BaseSearchEngine):
         for token in re.split(r"\s+", query.lower().strip()):
             if not token:
                 continue
-            words = re.findall(r"[a-z0-9]+", token)
+            words = re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", token)
             if words:
                 pieces.extend(words)
             else:
@@ -261,3 +261,4 @@ class BingEngine(BaseSearchEngine):
         except Exception as e:
             logger.error(f"Error in Bing search for query {query}: {e}", exc_info=True)
             return []
+
