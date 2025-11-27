@@ -77,7 +77,7 @@ class BingEngine(BaseSearchEngine):
             return []
         # 简单拆词，优先提取英文单词与数字
         pieces: List[str] = []
-        for token in re.split(r"\\s+", query.lower().strip()):
+        for token in re.split(r"\s+", query.lower().strip()):
             if not token:
                 continue
             words = re.findall(r"[a-z0-9]+", token)
@@ -91,7 +91,7 @@ class BingEngine(BaseSearchEngine):
         """粗粒度过滤：标题/摘要命中足够多的关键词"""
         if not keywords:
             return True
-        text = f"{title} {snippet}".lower()
+        text = f"{title} {snippet} {url}".lower()
         match_count = sum(1 for kw in keywords if kw in text)
         # 放宽：至少命中一个关键词即可
         return match_count >= 1
