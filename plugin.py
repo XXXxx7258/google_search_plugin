@@ -44,7 +44,6 @@ from .search_engines.tavily import TavilyEngine
 
 # 导入翻译工具
 from .tools.abbreviation_tool import AbbreviationTool
-from .tools.fetchers.zhihu_fetcher import ZhihuArticleFetcher
 
 logger = get_logger("google_search")
 
@@ -541,8 +540,8 @@ class WebSearchTool(BaseTool):
         return []
     
     async def _fetch_page_content(self, session: aiohttp.ClientSession, url: str) -> Optional[str]:
-        """抓取单个页面的正文内容，增加了对知乎的特殊处理
-        
+        """抓取单个页面的正文内容
+
         Args:
             session: aiohttp会话对象
             url: 待抓取的URL
@@ -550,81 +549,6 @@ class WebSearchTool(BaseTool):
         Returns:
             提取的正文内容，失败时返回None
         """
-        # --- 知乎特殊处理 ---
-        if "zhihu.com" in url:
-            # 检查总开关和Cookie是否都已配置
-            backend_config = self.plugin_config.get("search_backend", {})
-            if not backend_config.get("enable_zhihu_fetcher"):
-                return None # 功能未启用，直接跳过
-
-            fetcher = None
-            try:
-                zhihu_cookie_config = backend_config.get("zhihu_cookie", {})
-                _xsrf = zhihu_cookie_config.get("_xsrf")
-                d_c0 = zhihu_cookie_config.get("d_c0")
-                z_c0 = zhihu_cookie_config.get("z_c0")
-
-                if not all([_xsrf, d_c0, z_c0]):
-                    logger.warning("知乎专用抓取器已启用，但未完整配置 [zhihu_cookie]（缺少 _xsrf, d_c0, 或 z_c0），跳过。")
-                    return None
-
-                # 构造完整的 cookie 字符串
-                zhihu_cookie_str = f"_xsrf={_xsrf}; d_c0={d_c0}; z_c0={z_c0}"
-                fetcher = ZhihuArticleFetcher(cookie_string=zhihu_cookie_str)
-
-                # 检测知乎链接类型并提取ID
-                content_id = None
-                content_type = None
-
-                # 文章链接: https://zhuanlan.zhihu.com/p/123456
-                article_match = re.search(r'zhuanlan\.zhihu\.com/p/(\d+)', url)
-                if article_match:
-                    content_id = article_match.group(1)
-                    content_type = 'article'
-                    logger.info(f"检测到知乎文章链接，使用专用抓取器: {url}")
-
-                # 问题链接: https://www.zhihu.com/question/123456
-                question_match = re.search(r'zhihu\.com/question/(\d+)', url)
-                if question_match:
-                    content_id = question_match.group(1)
-                    content_type = 'question'
-                    logger.info(f"检测到知乎问题链接，使用专用抓取器: {url}")
-
-                # 回答链接: https://www.zhihu.com/question/123/answer/456 或 https://www.zhihu.com/answer/456
-                answer_match = re.search(r'zhihu\.com/(?:question/\d+/)?answer/(\d+)', url)
-                if answer_match:
-                    content_id = answer_match.group(1)
-                    content_type = 'answer'
-                    logger.info(f"检测到知乎回答链接，使用专用抓取器: {url}")
-
-                if not content_id or not content_type:
-                    logger.debug(f"无法识别的知乎链接格式: {url}")
-                    return None
-
-                # 根据内容类型调用相应的抓取方法
-                if content_type == 'article':
-                    success, content = await fetcher.fetch_article(content_id)
-                elif content_type == 'question':
-                    success, content = await fetcher.fetch_question(content_id)
-                elif content_type == 'answer':
-                    success, content = await fetcher.fetch_answer(content_id)
-                else:
-                    return None
-
-                if success:
-                    logger.info(f"知乎{content_type}抓取器成功获取内容。")
-                    return content
-                else:
-                    logger.warning(f"知乎{content_type}抓取器失败: {content}")
-                    return None
-            except Exception as e:
-                logger.error(f"调用知乎抓取器时发生异常: {e}", exc_info=True)
-                return None
-            finally:
-                if fetcher:
-                    await fetcher.close()
-        # --------------------
-
         timeout = self.backend_config.get("content_timeout", 10)
         max_length = self.backend_config.get("max_content_length", 3000)
         
@@ -1017,16 +941,6 @@ class google_search_simple(BasePlugin):
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
                 ],
                 description="抓取网页时使用的 User-Agent 列表，会从中随机选择。"
-            ),
-            "zhihu_cookie": {
-                "_xsrf": ConfigField(type=str, default="", description="知乎Cookie的 _xsrf 字段"),
-                "d_c0": ConfigField(type=str, default="", description="知乎Cookie的 d_c0 字段"),
-                "z_c0": ConfigField(type=str, default="", description="知乎Cookie的 z_c0 字段"),
-            },
-            "enable_zhihu_fetcher": ConfigField(
-                type=bool,
-                default=False,
-                description="是否启用知乎专用抓取器。注意：启用此功能需要先在您的系统中安装 Node.js 环境（一键包用户自带nodejs，添加到环境中即可）。"
             ),
         },
         "engines": {
