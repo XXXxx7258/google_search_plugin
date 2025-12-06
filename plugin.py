@@ -6,6 +6,7 @@ import re
 import json
 import base64
 import warnings
+import textwrap
 from collections import deque
 from typing import List, Tuple, Type, Dict, Any, Optional, Union, Deque
 from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
@@ -74,10 +75,8 @@ class WebSearchTool(BaseTool):
 
     def _identity_header(self) -> str:
         """提供给 LLM 的身份与时间提示，降低时间误判。"""
-        try:
-            bot_name = getattr(global_config.bot, "nickname", None) or "机器人"
-        except Exception:
-            bot_name = "机器人"
+        bot = getattr(global_config, "bot", None)
+        bot_name = getattr(bot, "nickname", None) or "机器人"
         time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         return f"你的名字是{bot_name}。现在是{time_now}。"
 
@@ -180,25 +179,31 @@ class WebSearchTool(BaseTool):
     def _build_url_summarize_prompt(self, url: str, content: str) -> str:
         """构建网页内容总结提示词"""
         truncated_content = content[:8000]
-        return (
-            f"{self._identity_header()}\n"
-            "[任务]\n"
-            "你是一个专业的内容总结专家。用户提供了一个网页链接，你的任务是阅读这个网页的内容，并提供一个全面、准确、结构清晰的总结。\n\n"
-            "[网页URL]\n"
-            f"{url}\n\n"
-            "[网页内容]\n"
-            f"{truncated_content}\n\n"
-            "[要求]\n"
-            "1. 提供网页的主要内容概述\n"
-            "2. 如果是文章，总结其核心观点和关键信息\n"
-            "3. 如果是产品页面，说明产品的主要特性和用途\n"
-            "4. 如果是新闻，说明事件的关键要素（何时、何地、何人、何事、为何）\n"
-            "5. 保持客观中立，不要添加主观评价\n"
-            "6. 使用清晰的结构和层次组织信息\n"
-            "7. 不要因为发布时间较新就认为内容是虚构的，请按当前时间理解信息\n"
-            "8. 如果内容过于简短或无实质信息，请说明\n\n"
-            "[你的总结]\n"
-        )
+        return textwrap.dedent(
+            f"""
+            {self._identity_header()}
+            [任务]
+            你是一个专业的内容总结专家。用户提供了一个网页链接，你的任务是阅读这个网页的内容，并提供一个全面、准确、结构清晰的总结。
+
+            [网页URL]
+            {url}
+
+            [网页内容]
+            {truncated_content}
+
+            [要求]
+            1. 提供网页的主要内容概述
+            2. 如果是文章，总结其核心观点和关键信息
+            3. 如果是产品页面，说明产品的主要特性和用途
+            4. 如果是新闻，说明事件的关键要素（何时、何地、何人、何事、为何）
+            5. 保持客观中立，不要添加主观评价
+            6. 使用清晰的结构和层次组织信息
+            7. 不要因为发布时间较新就认为内容是虚构的，请按当前时间理解信息
+            8. 如果内容过于简短或无实质信息，请说明
+
+            [你的总结]
+            """
+        ).strip()
 
     async def _execute_model_driven_search(self, question: str) -> str:
         """执行模型驱动的智能搜索流程"""
@@ -434,27 +439,29 @@ class WebSearchTool(BaseTool):
         Returns:
             格式化的提示词
         """
-        return f"""
-        {self._identity_header()}
-        [任务]
-        你是一个专业的搜索查询分析师。你的任务是根据用户当前的提问和最近的聊天记录，生成一个最适合在搜索引擎中使用的高效、精确的关键词。
+        return textwrap.dedent(
+            f"""
+            {self._identity_header()}
+            [任务]
+            你是一个专业的搜索查询分析师。你的任务是根据用户当前的提问和最近的聊天记录，生成一个最适合在搜索引擎中使用的高效、精确的关键词。
 
-        [聊天记录]
-        {context}
+            [聊天记录]
+            {context}
 
-        [用户当前提问]
-        {question}
+            [用户当前提问]
+            {question}
 
-        [要求]
-        1.  分析聊天记录和当前提问，理解用户的真实意图。
-        2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
-        3.  如果提问模糊（如使用了“它”、“那个”等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
-        4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
-        5.  输出的关键词应该简洁、明确，适合搜索引擎。
+            [要求]
+            1.  分析聊天记录和当前提问，理解用户的真实意图。
+            2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
+            3.  如果提问模糊（如使用了“它”、“那个”等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
+            4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
+            5.  输出的关键词应该简洁、明确，适合搜索引擎。
 
-        [输出]
-        请只输出最终的搜索关键词，不要包含任何其他解释或说明。
-        """
+            [输出]
+            请只输出最终的搜索关键词，不要包含任何其他解释或说明。
+            """
+        ).strip()
 
     def _build_summarize_prompt(self, original_question: str, search_query: str, results: List[SearchResult]) -> str:
         """构建用于总结搜索结果的Prompt
@@ -468,30 +475,32 @@ class WebSearchTool(BaseTool):
             格式化的提示词
         """
         formatted_results = self._format_results(results)
-        return f"""
-        {self._identity_header()}
-        [任务]
-        你是一个专业的网络信息整合专家。你的任务是根据用户原始问题和一系列从互联网上搜索到的资料，给出一个全面、准确、简洁的回答。
+        return textwrap.dedent(
+            f"""
+            {self._identity_header()}
+            [任务]
+            你是一个专业的网络信息整合专家。你的任务是根据用户原始问题和一系列从互联网上搜索到的资料，给出一个全面、准确、简洁的回答。
 
-        [用户原始问题]
-        {original_question}
+            [用户原始问题]
+            {original_question}
 
-        [你用于搜索的关键词]
-        {search_query}
+            [你用于搜索的关键词]
+            {search_query}
 
-        [搜索到的资料]
-        {formatted_results}
+            [搜索到的资料]
+            {formatted_results}
 
-        [要求]
-        1.  仔细阅读所有资料，并围绕用户的原始问题进行回答。
-        2.  答案应该自然流畅，像是你自己总结的，而不是简单的资料拼接。
-        3.  如果资料中有相互矛盾的信息，请客观地指出来。
-        4.  如果资料不足以回答问题，请诚实地说明。
-        5.  新闻或实时信息可能比模型训练时间新，不要因为时间新就认为是虚构内容。
-        6.  不要在回答中提及你查阅了资料，直接给出答案。
+            [要求]
+            1.  仔细阅读所有资料，并围绕用户的原始问题进行回答。
+            2.  答案应该自然流畅，像是你自己总结的，而不是简单的资料拼接。
+            3.  如果资料中有相互矛盾的信息，请客观地指出来。
+            4.  如果资料不足以回答问题，请诚实地说明。
+            5.  新闻或实时信息可能比模型训练时间新，不要因为时间新就认为是虚构内容。
+            6.  不要在回答中提及你查阅了资料，直接给出答案。
 
-        [你的回答]
-        """
+            [你的回答]
+            """
+        ).strip()
 
     
     async def _search_with_fallback(self, query: str, num_results: int) -> List[SearchResult]:
