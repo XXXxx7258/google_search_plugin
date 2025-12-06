@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "name": "网页搜索以及缩写翻译以及图片搜索插件 (Web Search and Abbreviation Translation Plugin and...)",
+  "name": "麦麦联网插件（search plugin）",
   "version": "1.0.0",
   "description": "支持多个搜索引擎的网络搜索以及聚合翻译搜索以及图片搜索插件，具有自动降级功能。",
   "author": {
@@ -48,6 +48,7 @@
   }
 
 }
+
 
 
 
