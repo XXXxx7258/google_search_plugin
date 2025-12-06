@@ -21,6 +21,7 @@ warnings.filterwarnings("ignore", message=".*ruthless removal.*")
 from src.common.logger import get_logger
 from src.common.database.database_model import ChatHistory
 from src.chat.utils.utils import parse_keywords_string
+from src.config.config import global_config
 from src.plugin_system import (
     BasePlugin,
     register_plugin,
@@ -70,6 +71,15 @@ class WebSearchTool(BaseTool):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._initialize_engines()
+
+    def _identity_header(self) -> str:
+        """提供给 LLM 的身份与时间提示，降低时间误判。"""
+        try:
+            bot_name = getattr(global_config.bot, "nickname", None) or "机器人"
+        except Exception:
+            bot_name = "机器人"
+        time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        return f"你的名字是{bot_name}。现在是{time_now}。"
 
     def _initialize_engines(self) -> None:
         """初始化搜索引擎"""
@@ -171,6 +181,7 @@ class WebSearchTool(BaseTool):
         """构建网页内容总结提示词"""
         truncated_content = content[:8000]
         return (
+            f"{self._identity_header()}\n"
             "[任务]\n"
             "你是一个专业的内容总结专家。用户提供了一个网页链接，你的任务是阅读这个网页的内容，并提供一个全面、准确、结构清晰的总结。\n\n"
             "[网页URL]\n"
@@ -184,7 +195,8 @@ class WebSearchTool(BaseTool):
             "4. 如果是新闻，说明事件的关键要素（何时、何地、何人、何事、为何）\n"
             "5. 保持客观中立，不要添加主观评价\n"
             "6. 使用清晰的结构和层次组织信息\n"
-            "7. 如果内容过于简短或无实质信息，请说明\n\n"
+            "7. 不要因为发布时间较新就认为内容是虚构的，请按当前时间理解信息\n"
+            "8. 如果内容过于简短或无实质信息，请说明\n\n"
             "[你的总结]\n"
         )
 
@@ -423,6 +435,7 @@ class WebSearchTool(BaseTool):
             格式化的提示词
         """
         return f"""
+        {self._identity_header()}
         [任务]
         你是一个专业的搜索查询分析师。你的任务是根据用户当前的提问和最近的聊天记录，生成一个最适合在搜索引擎中使用的高效、精确的关键词。
 
@@ -456,6 +469,7 @@ class WebSearchTool(BaseTool):
         """
         formatted_results = self._format_results(results)
         return f"""
+        {self._identity_header()}
         [任务]
         你是一个专业的网络信息整合专家。你的任务是根据用户原始问题和一系列从互联网上搜索到的资料，给出一个全面、准确、简洁的回答。
 
@@ -473,7 +487,8 @@ class WebSearchTool(BaseTool):
         2.  答案应该自然流畅，像是你自己总结的，而不是简单的资料拼接。
         3.  如果资料中有相互矛盾的信息，请客观地指出来。
         4.  如果资料不足以回答问题，请诚实地说明。
-        5.  不要在回答中提及你查阅了资料，直接给出答案。
+        5.  新闻或实时信息可能比模型训练时间新，不要因为时间新就认为是虚构内容。
+        6.  不要在回答中提及你查阅了资料，直接给出答案。
 
         [你的回答]
         """
