@@ -35,6 +35,7 @@ from src.plugin_system import (
     llm_api,
     message_api
 )
+from src.plugin_system.base.config_types import ConfigSection
 
 # 导入搜索引擎
 from .search_engines.base import SearchResult
@@ -1025,6 +1026,75 @@ class google_search_simple(BasePlugin):
         
         return components
 
+    def get_webui_config_schema(self) -> Dict[str, Any]:
+        """
+        递归展开嵌套 schema，生成 WebUI 可识别的完整配置 schema。
+        仅改插件侧，避免框架丢弃子层字段（如 actions/engines 内的 ConfigField）。
+        """
+        schema: Dict[str, Any] = {
+            "plugin_id": self.plugin_name,
+            "plugin_info": {
+                "name": self.display_name,
+                "version": self.plugin_version,
+                "description": self.plugin_description,
+                "author": self.plugin_author,
+            },
+            "sections": {},
+            "layout": {"type": "auto", "tabs": []},
+        }
+
+        def ensure_section(section_name: str) -> Dict[str, Any]:
+            if section_name in schema["sections"]:
+                return schema["sections"][section_name]
+
+            section_data: Dict[str, Any] = {
+                "name": section_name,
+                "title": section_name,
+                "description": None,
+                "icon": None,
+                "collapsed": False,
+                "order": 0,
+                "fields": {},
+            }
+
+            # 继承基类的 section 元数据
+            section_meta = self.config_section_descriptions.get(section_name)
+            if section_meta:
+                if isinstance(section_meta, str):
+                    section_data["title"] = section_meta
+                elif isinstance(section_meta, ConfigSection):
+                    section_data["title"] = section_meta.title
+                    section_data["description"] = section_meta.description
+                    section_data["icon"] = section_meta.icon
+                    section_data["collapsed"] = section_meta.collapsed
+                    section_data["order"] = section_meta.order
+                elif isinstance(section_meta, dict):
+                    section_data.update(section_meta)
+
+            schema["sections"][section_name] = section_data
+            return section_data
+
+        def flatten_fields(section_name: str, fields: Dict[str, Any], prefix: str = "") -> None:
+            section_data = ensure_section(section_name)
+            for field_name, field_def in fields.items():
+                full_name = f"{prefix}{field_name}" if prefix else field_name
+                if isinstance(field_def, ConfigField):
+                    field_data = field_def.to_dict()
+                    field_data["name"] = full_name
+                    # 使用 group 把同一子层的字段归类
+                    if prefix:
+                        field_data.setdefault("group", prefix.rstrip("."))
+                    section_data["fields"][full_name] = field_data
+                elif isinstance(field_def, dict):
+                    # 继续在同一 section 内递归，字段命名使用路径
+                    flatten_fields(section_name, field_def, f"{full_name}.")
+
+        for section_name, section_fields in self.config_schema.items():
+            if isinstance(section_fields, dict):
+                flatten_fields(section_name, section_fields)
+
+        return schema
+
     def _get_default_config_from_schema(self, schema_part: Dict[str, Any]) -> Dict[str, Any]:
         """递归地从 schema 生成默认配置字典
         
@@ -1126,6 +1196,60 @@ class google_search_simple(BasePlugin):
         except Exception as e:
             logger.error(f"{self.log_prefix} 加载配置文件失败: {e}，将使用默认配置。")
             self.config = default_config
+
+        # 将 WebUI 可能写入的点号键还原为嵌套结构（例如 engines -> "tavily.api_keys"）
+        def _normalize_dotted_keys(obj: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+            changed = False
+            items = list(obj.items())
+            for k, v in items:
+                if "." in k:
+                    changed = True
+                    parts = k.split(".")
+                    current = obj
+                    for idx, part in enumerate(parts):
+                        if idx == len(parts) - 1:
+                            current[part] = v
+                        else:
+                            current = current.setdefault(part, {})
+                    obj.pop(k, None)
+                if isinstance(v, dict):
+                    new_v, sub_changed = _normalize_dotted_keys(v)
+                    obj[k] = new_v
+                    changed = changed or sub_changed
+            return obj, changed
+
+        # 根据 schema 纠正类型（特别是 list 字段被 WebUI 当作字符串保存时）
+        def _coerce_types(schema_part: Dict[str, Any], config_part: Dict[str, Any]) -> bool:
+            changed = False
+            for key, schema_val in schema_part.items():
+                if isinstance(schema_val, ConfigField):
+                    if key in config_part:
+                        if schema_val.type is list and isinstance(config_part[key], str):
+                            # WebUI 可能用逗号分隔字符串存储，转回列表
+                            config_part[key] = [item.strip() for item in config_part[key].split(",") if item.strip()]
+                            changed = True
+                elif isinstance(schema_val, dict):
+                    if key in config_part and isinstance(config_part[key], dict):
+                        sub_changed = _coerce_types(schema_val, config_part[key])
+                        changed = changed or sub_changed
+            return changed
+
+        self.config, dotted_changed = _normalize_dotted_keys(self.config)
+        type_changed = _coerce_types(self.config_schema, self.config)
+
+        # 回写规范化后的配置，避免文件中残留 "tavily.api_keys" 这类扁平键
+        if (dotted_changed or type_changed) and self.plugin_dir:
+            try:
+                full_toml_str = f"# {self.plugin_name} - 规范化后的配置文件\n"
+                full_toml_str += f"# {self.get_manifest_info('description', '插件配置文件')}\n"
+                for section, schema_fields in self.config_schema.items():
+                    full_toml_str += f"\n[{section}]\n"
+                    full_toml_str += self._generate_toml_string(schema_fields, self.config.get(section, {}), "", section)
+                with open(os.path.join(self.plugin_dir, self.config_file_name), "w", encoding="utf-8") as f:
+                    f.write(full_toml_str)
+                logger.info(f"{self.log_prefix} 已回写规范化配置，移除扁平键与错误类型")
+            except Exception as e:
+                logger.warning(f"{self.log_prefix} 回写规范化配置失败: {e}")
 
         # 从配置中更新 enable_plugin 状态
         if "plugin" in self.config and "enabled" in self.config["plugin"]:
