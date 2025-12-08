@@ -968,8 +968,8 @@ class google_search_simple(BasePlugin):
     config_schema: Dict[str, Dict[str, Union[ConfigField, Dict]]] = {
         "plugin": {
             "name": ConfigField(type=str, default="google_search", description="插件名称"),
-            "version": ConfigField(type=str, default="3.1.0", description="插件版本"),
-            "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
+            "version": ConfigField(type=str, default="3.2.0", description="插件版本"),
+            "enabled": ConfigField(type=bool, default=false, description="是否启用插件"),
         },
         "model_config": {
             "model_name": ConfigField(type=str, default="replyer", description="指定用于搜索和总结的系统模型名称。默认为 'replyer'，即系统主回复模型。"),
