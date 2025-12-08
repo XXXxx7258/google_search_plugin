@@ -1,3 +1,4 @@
+import json
 import re
 import random
 import logging
@@ -83,9 +84,6 @@ class SogouEngine(BaseSearchEngine):
             图片信息字典列表，格式：[{"image": "图片URL", "title": "图片标题", "thumbnail": "缩略图URL"}]
         """
         try:
-            from urllib.parse import urlencode
-            import json
-            
             # 构建搜狗图片搜索URL
             params = {
                 "query": query,

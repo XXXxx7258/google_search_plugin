@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from typing import List, Dict, Any, Optional
@@ -252,8 +253,6 @@ class BingEngine(BaseSearchEngine):
             图片信息字典列表，格式：[{"image": "图片URL", "title": "图片标题", "thumbnail": "缩略图URL"}]
         """
         try:
-            from urllib.parse import urlencode
-            
             # 构建Bing图片搜索URL
             params = {
                 "q": query,
@@ -295,7 +294,6 @@ class BingEngine(BaseSearchEngine):
                     # 尝试从m属性获取JSON数据
                     m_attr = elem.get("m")
                     if m_attr:
-                        import json
                         try:
                             m_data = json.loads(m_attr)
                             image_url = m_data.get("murl", "")  # 原图URL

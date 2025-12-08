@@ -435,13 +435,13 @@ class WebSearchTool(BaseTool):
         [要求]
         1.  分析聊天记录和当前提问，理解用户的真实意图。
         2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
-        3.  如果提问模糊（如使用了“它”、“那个”等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
+        3.  如果提问模糊（如使用了"它"、"那个"等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
         4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
         5.  输出的关键词应该简洁、明确，适合搜索引擎。
 
         [输出]
         请只输出最终的搜索关键词，不要包含任何其他解释或说明。
-        """
+        """.strip()
 
     def _build_summarize_prompt(self, original_question: str, search_query: str, results: List[SearchResult]) -> str:
         """构建用于总结搜索结果的Prompt
@@ -476,7 +476,7 @@ class WebSearchTool(BaseTool):
         5.  不要在回答中提及你查阅了资料，直接给出答案。
 
         [你的回答]
-        """
+        """.strip()
 
     
     async def _search_with_fallback(self, query: str, num_results: int) -> List[SearchResult]:
@@ -847,25 +847,26 @@ class ImageSearchAction(BaseAction):
             # 按配置的引擎顺序尝试搜索
             image_results = []
             used_engine = None
-            
+
+            # 定义引擎映射
+            engine_map = {
+                "bing": (self.bing, "Bing"),
+                "sogou": (self.sogo, "搜狗"),
+                "duckduckgo": (self.duckduckgo, "DuckDuckGo")
+            }
+
             for engine_name in self.engine_order:
                 try:
-                    if engine_name == "bing":
-                        logger.info(f"尝试使用Bing搜索图片: {query}")
-                        image_results = await self.bing.search_images(query, num_results)
-                        used_engine = "Bing"
-                    elif engine_name == "sogou":
-                        logger.info(f"尝试使用搜狗搜索图片: {query}")
-                        image_results = await self.sogo.search_images(query, num_results)
-                        used_engine = "搜狗"
-                    elif engine_name == "duckduckgo":
-                        logger.info(f"尝试使用DuckDuckGo搜索图片: {query}")
-                        image_results = await self.duckduckgo.search_images(query, num_results)
-                        used_engine = "DuckDuckGo"
-                    else:
+                    engine_info = engine_map.get(engine_name)
+                    if not engine_info:
                         logger.warning(f"未知的图片搜索引擎: {engine_name}")
                         continue
-                    
+
+                    engine, display_name = engine_info
+                    logger.info(f"尝试使用{display_name}搜索图片: {query}")
+                    image_results = await engine.search_images(query, num_results)
+                    used_engine = display_name
+
                     if image_results:
                         logger.info(f"{used_engine}图片搜索成功，找到 {len(image_results)} 张图片")
                         break
