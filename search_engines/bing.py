@@ -264,12 +264,14 @@ class BingEngine(BaseSearchEngine):
 
             # 尝试多个Bing图片搜索域名
             html = ""
+            successful_base_url = ""
             for base_url in self.base_urls:
                 try:
                     search_url = f"{base_url}/images/search?{urlencode(params)}"
-                    logger.info(f"请求Bing图片搜索URL: {search_url}")
+                    logger.debug(f"请求Bing图片搜索URL: {search_url}")
                     html = await self._get_html(search_url)
                     if html and ("img_cont" in html or "iusc" in html):
+                        successful_base_url = base_url
                         break
                 except Exception as e:
                     logger.warning(f"Bing图片搜索域名 {base_url} 失败: {e}")
@@ -315,8 +317,8 @@ class BingEngine(BaseSearchEngine):
                             # 处理相对路径
                             if image_url.startswith("//"):
                                 image_url = "https:" + image_url
-                            elif image_url.startswith("/"):
-                                image_url = "https://cn.bing.com" + image_url
+                            elif image_url.startswith("/") and successful_base_url:
+                                image_url = f"{successful_base_url}{image_url}"
 
                             if image_url.startswith(("http://", "https://")):
                                 title = img_elem.get("alt") or query
@@ -329,7 +331,7 @@ class BingEngine(BaseSearchEngine):
                     logger.debug(f"解析Bing图片元素失败: {e}")
                     continue
 
-            logger.info(f"Bing图片搜索找到 {len(results)} 张图片: {query}")
+            logger.debug(f"Bing图片搜索找到 {len(results)} 张图片: {query}")
             return results[:num_results]
 
         except Exception as e:

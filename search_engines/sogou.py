@@ -10,7 +10,10 @@ logger = logging.getLogger(__name__)
 
 class SogouEngine(BaseSearchEngine):
     """搜狗搜索引擎实现"""
-    
+
+    # 图片搜索基础URL常量
+    IMAGE_BASE_URL: str = "https://pic.sogou.com"
+
     base_urls: List[str]
     s_from: str
     sst_type: str
@@ -92,8 +95,8 @@ class SogouEngine(BaseSearchEngine):
                 "tn": 0
             }
 
-            search_url = f"https://pic.sogou.com/pics?{urlencode(params)}"
-            logger.info(f"请求搜狗图片搜索URL: {search_url}")
+            search_url = f"{self.IMAGE_BASE_URL}/pics?{urlencode(params)}"
+            logger.debug(f"请求搜狗图片搜索URL: {search_url}")
 
             html = await self._get_html(search_url)
             if not html:
@@ -118,17 +121,24 @@ class SogouEngine(BaseSearchEngine):
                                 if pic_url.startswith("//"):
                                     pic_url = "https:" + pic_url
 
+                                # 规范化缩略图URL，保持与主图一致的规则
+                                if thumb_url and thumb_url.startswith("//"):
+                                    thumb_url = "https:" + thumb_url
+                                # 如果缩略图不是绝对URL，则回退到规范化后的主图URL
+                                if not (thumb_url and thumb_url.startswith(("http://", "https://"))):
+                                    thumb_url = pic_url
+
                                 if pic_url.startswith(("http://", "https://")):
                                     results.append({
                                         "image": pic_url,
                                         "title": title,
-                                        "thumbnail": thumb_url or pic_url
+                                        "thumbnail": thumb_url
                                     })
                         except Exception as e:
                             logger.debug(f"解析搜狗图片项失败: {e}")
                             continue
 
-                    logger.info(f"搜狗图片搜索JSON解析找到 {len(results)} 张图片: {query}")
+                    logger.debug(f"搜狗图片搜索JSON解析找到 {len(results)} 张图片: {query}")
                     return results[:num_results]
 
             except json.JSONDecodeError:
@@ -148,7 +158,7 @@ class SogouEngine(BaseSearchEngine):
                                 if image_url.startswith("//"):
                                     image_url = "https:" + image_url
                                 elif image_url.startswith("/"):
-                                    image_url = "https://pic.sogou.com" + image_url
+                                    image_url = self.IMAGE_BASE_URL + image_url
 
                                 if image_url.startswith(("http://", "https://")):
                                     title = img_elem.get("alt") or query
@@ -161,7 +171,7 @@ class SogouEngine(BaseSearchEngine):
                         logger.debug(f"解析搜狗图片HTML元素失败: {e}")
                         continue
 
-                logger.info(f"搜狗图片搜索HTML解析找到 {len(results)} 张图片: {query}")
+                logger.debug(f"搜狗图片搜索HTML解析找到 {len(results)} 张图片: {query}")
                 return results[:num_results]
 
         except Exception as e:
