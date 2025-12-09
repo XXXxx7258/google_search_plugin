@@ -6,7 +6,6 @@ import re
 import json
 import base64
 import warnings
-import textwrap
 from collections import deque
 from typing import List, Tuple, Type, Dict, Any, Optional, Union, Deque
 from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
@@ -22,7 +21,6 @@ warnings.filterwarnings("ignore", message=".*ruthless removal.*")
 from src.common.logger import get_logger
 from src.common.database.database_model import ChatHistory
 from src.chat.utils.utils import parse_keywords_string
-from src.config.config import global_config
 from src.plugin_system import (
     BasePlugin,
     register_plugin,
@@ -35,7 +33,6 @@ from src.plugin_system import (
     llm_api,
     message_api
 )
-from src.plugin_system.base.config_types import ConfigSection
 
 # 导入搜索引擎
 from .search_engines.base import SearchResult
@@ -73,13 +70,6 @@ class WebSearchTool(BaseTool):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._initialize_engines()
-
-    def _identity_header(self) -> str:
-        """提供给 LLM 的身份与时间提示，降低时间误判。"""
-        bot = getattr(global_config, "bot", None)
-        bot_name = getattr(bot, "nickname", None) or "机器人"
-        time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        return f"你的名字是{bot_name}。现在是{time_now}。"
 
     def _initialize_engines(self) -> None:
         """初始化搜索引擎"""
@@ -180,31 +170,23 @@ class WebSearchTool(BaseTool):
     def _build_url_summarize_prompt(self, url: str, content: str) -> str:
         """构建网页内容总结提示词"""
         truncated_content = content[:8000]
-        return textwrap.dedent(
-            f"""
-            {self._identity_header()}
-            [任务]
-            你是一个专业的内容总结专家。用户提供了一个网页链接，你的任务是阅读这个网页的内容，并提供一个全面、准确、结构清晰的总结。
-
-            [网页URL]
-            {url}
-
-            [网页内容]
-            {truncated_content}
-
-            [要求]
-            1. 提供网页的主要内容概述
-            2. 如果是文章，总结其核心观点和关键信息
-            3. 如果是产品页面，说明产品的主要特性和用途
-            4. 如果是新闻，说明事件的关键要素（何时、何地、何人、何事、为何）
-            5. 保持客观中立，不要添加主观评价
-            6. 使用清晰的结构和层次组织信息
-            7. 不要因为发布时间较新就认为内容是虚构的，请按当前时间理解信息
-            8. 如果内容过于简短或无实质信息，请说明
-
-            [你的总结]
-            """
-        ).strip()
+        return (
+            "[任务]\n"
+            "你是一个专业的内容总结专家。用户提供了一个网页链接，你的任务是阅读这个网页的内容，并提供一个全面、准确、结构清晰的总结。\n\n"
+            "[网页URL]\n"
+            f"{url}\n\n"
+            "[网页内容]\n"
+            f"{truncated_content}\n\n"
+            "[要求]\n"
+            "1. 提供网页的主要内容概述\n"
+            "2. 如果是文章，总结其核心观点和关键信息\n"
+            "3. 如果是产品页面，说明产品的主要特性和用途\n"
+            "4. 如果是新闻，说明事件的关键要素（何时、何地、何人、何事、为何）\n"
+            "5. 保持客观中立，不要添加主观评价\n"
+            "6. 使用清晰的结构和层次组织信息\n"
+            "7. 如果内容过于简短或无实质信息，请说明\n\n"
+            "[你的总结]\n"
+        )
 
     async def _execute_model_driven_search(self, question: str) -> str:
         """执行模型驱动的智能搜索流程"""
@@ -440,29 +422,26 @@ class WebSearchTool(BaseTool):
         Returns:
             格式化的提示词
         """
-        return textwrap.dedent(
-            f"""
-            {self._identity_header()}
-            [任务]
-            你是一个专业的搜索查询分析师。你的任务是根据用户当前的提问和最近的聊天记录，生成一个最适合在搜索引擎中使用的高效、精确的关键词。
+        return f"""
+        [任务]
+        你是一个专业的搜索查询分析师。你的任务是根据用户当前的提问和最近的聊天记录，生成一个最适合在搜索引擎中使用的高效、精确的关键词。
 
-            [聊天记录]
-            {context}
+        [聊天记录]
+        {context}
 
-            [用户当前提问]
-            {question}
+        [用户当前提问]
+        {question}
 
-            [要求]
-            1.  分析聊天记录和当前提问，理解用户的真实意图。
-            2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
-            3.  如果提问模糊（如使用了“它”、“那个”等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
-            4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
-            5.  输出的关键词应该简洁、明确，适合搜索引擎。
+        [要求]
+        1.  分析聊天记录和当前提问，理解用户的真实意图。
+        2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
+        3.  如果提问模糊（如使用了"它"、"那个"等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
+        4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
+        5.  输出的关键词应该简洁、明确，适合搜索引擎。
 
-            [输出]
-            请只输出最终的搜索关键词，不要包含任何其他解释或说明。
-            """
-        ).strip()
+        [输出]
+        请只输出最终的搜索关键词，不要包含任何其他解释或说明。
+        """.strip()
 
     def _build_summarize_prompt(self, original_question: str, search_query: str, results: List[SearchResult]) -> str:
         """构建用于总结搜索结果的Prompt
@@ -476,32 +455,28 @@ class WebSearchTool(BaseTool):
             格式化的提示词
         """
         formatted_results = self._format_results(results)
-        return textwrap.dedent(
-            f"""
-            {self._identity_header()}
-            [任务]
-            你是一个专业的网络信息整合专家。你的任务是根据用户原始问题和一系列从互联网上搜索到的资料，给出一个全面、准确、简洁的回答。
+        return f"""
+        [任务]
+        你是一个专业的网络信息整合专家。你的任务是根据用户原始问题和一系列从互联网上搜索到的资料，给出一个全面、准确、简洁的回答。
 
-            [用户原始问题]
-            {original_question}
+        [用户原始问题]
+        {original_question}
 
-            [你用于搜索的关键词]
-            {search_query}
+        [你用于搜索的关键词]
+        {search_query}
 
-            [搜索到的资料]
-            {formatted_results}
+        [搜索到的资料]
+        {formatted_results}
 
-            [要求]
-            1.  仔细阅读所有资料，并围绕用户的原始问题进行回答。
-            2.  答案应该自然流畅，像是你自己总结的，而不是简单的资料拼接。
-            3.  如果资料中有相互矛盾的信息，请客观地指出来。
-            4.  如果资料不足以回答问题，请诚实地说明。
-            5.  新闻或实时信息可能比模型训练时间新，不要因为时间新就认为是虚构内容。
-            6.  不要在回答中提及你查阅了资料，直接给出答案。
+        [要求]
+        1.  仔细阅读所有资料，并围绕用户的原始问题进行回答。
+        2.  答案应该自然流畅，像是你自己总结的，而不是简单的资料拼接。
+        3.  如果资料中有相互矛盾的信息，请客观地指出来。
+        4.  如果资料不足以回答问题，请诚实地说明。
+        5.  不要在回答中提及你查阅了资料，直接给出答案。
 
-            [你的回答]
-            """
-        ).strip()
+        [你的回答]
+        """.strip()
 
     
     async def _search_with_fallback(self, query: str, num_results: int) -> List[SearchResult]:
@@ -784,8 +759,12 @@ class ImageSearchAction(BaseAction):
     
     # 实例属性
     enabled: bool
+    bing: BingEngine
+    sogo: SogouEngine
     duckduckgo: DuckDuckGoEngine
     backend_config: Dict[str, Any]
+    image_search_config: Dict[str, Any]
+    engine_order: List[str]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -800,16 +779,41 @@ class ImageSearchAction(BaseAction):
             logger.info("图片搜索功能已在配置中禁用")
             return
         
-        # 仅在启用时初始化引擎
+        # 获取图片搜索配置
         config = self.plugin_config
+        self.image_search_config = config.get("actions", {}).get("image_search", {})
         engines_config = config.get("engines", {})
         backend_config = config.get("search_backend", {})
+        
+        # 获取默认引擎和引擎顺序配置
+        default_engine = self.image_search_config.get("default_engine", "bing")
+        engine_order = self.image_search_config.get("engine_order", ["bing", "sogou", "duckduckgo"])
+        
+        # 确保默认引擎在顺序列表中，并且排在第一位
+        if default_engine in ["bing", "sogou", "duckduckgo"]:
+            # 从顺序列表中移除默认引擎（如果存在）
+            engine_order = [e for e in engine_order if e != default_engine]
+            # 将默认引擎插入到第一位
+            engine_order.insert(0, default_engine)
+        
+        self.engine_order = engine_order
+        logger.info(f"图片搜索引擎顺序: {self.engine_order} (默认引擎: {default_engine})")
+        
+        # 通用配置
         common_config = {
             "timeout": backend_config.get("timeout", 20),
             "proxy": backend_config.get("proxy")
         }
+        
+        # 初始化所有可用的图片搜索引擎
+        bing_config = {**engines_config.get("bing", {}), **common_config}
+        sogou_config = {**engines_config.get("sogou", {}), **common_config}
         duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
+        
+        self.bing = BingEngine(bing_config)
+        self.sogo = SogouEngine(sogou_config)
         self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
+        
         self.backend_config = config.get("search_backend", {})
         max_results = self.backend_config.get("max_results")
         if isinstance(max_results, int) and max_results > 0:
@@ -825,7 +829,7 @@ class ImageSearchAction(BaseAction):
         # 检查是否启用
         if not getattr(self, 'enabled', False):
             await self.send_text(
-                "图片搜索功能当前未启用。如需使用，请在配置文件中启用此功能（注意：需要科学上网工具）。",
+                "图片搜索功能当前未启用。如需使用，请在配置文件中启用此功能。",
                 set_reply=True,
                 reply_message=self.action_message
             )
@@ -840,7 +844,37 @@ class ImageSearchAction(BaseAction):
             logger.info(f"开始执行图片搜索动作，关键词: {query}")
             num_results = self.backend_config.get("max_results", 10) # 搜索结果数量配置
             
-            image_results = await self.duckduckgo.search_images(query, num_results)
+            # 按配置的引擎顺序尝试搜索
+            image_results = []
+            used_engine = None
+
+            # 定义引擎映射
+            engine_map = {
+                "bing": (self.bing, "Bing"),
+                "sogou": (self.sogo, "搜狗"),
+                "duckduckgo": (self.duckduckgo, "DuckDuckGo")
+            }
+
+            for engine_name in self.engine_order:
+                try:
+                    engine_info = engine_map.get(engine_name)
+                    if not engine_info:
+                        logger.warning(f"未知的图片搜索引擎: {engine_name}")
+                        continue
+
+                    engine, display_name = engine_info
+                    logger.info(f"尝试使用{display_name}搜索图片: {query}")
+                    image_results = await engine.search_images(query, num_results)
+                    used_engine = display_name
+
+                    if image_results:
+                        logger.info(f"{used_engine}图片搜索成功，找到 {len(image_results)} 张图片")
+                        break
+                    else:
+                        logger.info(f"{used_engine}图片搜索未找到结果，尝试下一个引擎")
+                except Exception as e:
+                    logger.warning(f"{engine_name}图片搜索失败: {e}")
+                    continue
             
             if not image_results:
                 await self.send_text(f"我没找到关于「{query}」的图片呢。", set_reply=True, reply_message=self.action_message)
@@ -894,8 +928,8 @@ class ImageSearchAction(BaseAction):
                         success = await self.send_image(b64_data, set_reply=True, reply_message=self.action_message)
                         if success:
                             history.append(url)
-                            logger.info(f"成功发送了关于「{query}」的图片。")
-                            return True, "图片发送成功"
+                            logger.info(f"成功使用{used_engine}发送了关于「{query}」的图片。")
+                            return True, f"图片发送成功（来源：{used_engine}）"
                         else:
                             history.append(url)
                             logger.error("调用 send_image 失败。")
@@ -935,8 +969,8 @@ class google_search_simple(BasePlugin):
     config_schema: Dict[str, Dict[str, Union[ConfigField, Dict]]] = {
         "plugin": {
             "name": ConfigField(type=str, default="google_search", description="插件名称"),
-            "version": ConfigField(type=str, default="3.1.0", description="插件版本"),
-            "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
+            "version": ConfigField(type=str, default="3.2.0", description="插件版本"),
+            "enabled": ConfigField(type=bool, default=False, description="是否启用插件"),
         },
         "model_config": {
             "model_name": ConfigField(type=str, default="replyer", description="指定用于搜索和总结的系统模型名称。默认为 'replyer'，即系统主回复模型。"),
@@ -946,7 +980,13 @@ class google_search_simple(BasePlugin):
         },
         "actions": {
             "image_search": {
-                "enabled": ConfigField(type=bool, default=False, description="是否启用图片搜索功能。注意：图片搜索需要科学上网工具才能正常使用。"),
+                "enabled": ConfigField(type=bool, default=True, description="是否启用图片搜索功能"),
+                "default_engine": ConfigField(type=str, default="bing", choices=["bing", "sogou", "duckduckgo"], description="默认图片搜索引擎"),
+                "engine_order": ConfigField(
+                    type=list, 
+                    default=["bing", "sogou", "duckduckgo"], 
+                    description="图片搜索引擎降级顺序。按顺序尝试搜索，直到找到结果为止。"
+                ),
             },
         },
         "search_backend": {
@@ -989,7 +1029,7 @@ class google_search_simple(BasePlugin):
             },
             "tavily": {
                 "enabled": ConfigField(type=bool, default=False, description="是否启用 Tavily 搜索"),
-                "api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时用,分隔即可，随机选用"),
+                "api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时随机选取一个使用"),
                 "api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
                 "search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
                 "include_raw_content": ConfigField(type=bool, default=False, description="是否返回网页原始内容"),
@@ -1025,77 +1065,6 @@ class google_search_simple(BasePlugin):
             logger.info(f"{self.log_prefix} 图片搜索功能未启用，跳过注册")
         
         return components
-
-    def get_webui_config_schema(self) -> Dict[str, Any]:
-        """
-        递归展开嵌套 schema，生成 WebUI 可识别的完整配置 schema。
-        仅改插件侧，避免框架丢弃子层字段（如 actions/engines 内的 ConfigField）。
-        """
-        schema: Dict[str, Any] = {
-            "plugin_id": self.plugin_name,
-            "plugin_info": {
-                "name": self.display_name,
-                "version": self.plugin_version,
-                "description": self.plugin_description,
-                "author": self.plugin_author,
-            },
-            "sections": {},
-            "layout": {"type": "auto", "tabs": []},
-        }
-
-        def ensure_section(section_name: str) -> Dict[str, Any]:
-            if section_name in schema["sections"]:
-                return schema["sections"][section_name]
-
-            section_data: Dict[str, Any] = {
-                "name": section_name,
-                "title": section_name,
-                "description": None,
-                "icon": None,
-                "collapsed": False,
-                "order": 0,
-                "fields": {},
-            }
-
-            # 继承基类的 section 元数据
-            section_meta = getattr(self, "config_section_descriptions", {}).get(section_name)
-            if section_meta:
-                if isinstance(section_meta, str):
-                    section_data["title"] = section_meta
-                elif isinstance(section_meta, ConfigSection):
-                    section_data["title"] = section_meta.title
-                    section_data["description"] = section_meta.description
-                    section_data["icon"] = section_meta.icon
-                    section_data["collapsed"] = section_meta.collapsed
-                    section_data["order"] = section_meta.order
-                elif isinstance(section_meta, dict):
-                    section_data.update(section_meta)
-
-            schema["sections"][section_name] = section_data
-            return section_data
-
-        def flatten_fields(section_name: str, fields: Dict[str, Any], prefix: str = "") -> None:
-            section_data = ensure_section(section_name)
-            for field_name, field_def in fields.items():
-                full_name = f"{prefix}{field_name}" if prefix else field_name
-                if isinstance(field_def, ConfigField):
-                    field_data = field_def.to_dict()
-                    field_data["name"] = full_name
-                    # 使用 group 把同一子层的字段归类
-                    if prefix:
-                        field_data.setdefault("group", prefix.rstrip("."))
-                    section_data["fields"][full_name] = field_data
-                elif isinstance(field_def, dict):
-                    # 继续在同一 section 内递归，字段命名使用路径
-                    flatten_fields(section_name, field_def, f"{full_name}.")
-                else:
-                    logger.warning(f"{self.log_prefix} 未知字段类型已跳过: {full_name} ({type(field_def)})")
-
-        for section_name, section_fields in self.config_schema.items():
-            if isinstance(section_fields, dict):
-                flatten_fields(section_name, section_fields)
-
-        return schema
 
     def _get_default_config_from_schema(self, schema_part: Dict[str, Any]) -> Dict[str, Any]:
         """递归地从 schema 生成默认配置字典
@@ -1176,7 +1145,14 @@ class google_search_simple(BasePlugin):
             full_toml_str += f"# {self.get_manifest_info('description', '插件配置文件')}\n"
             
             for section, schema_fields in self.config_schema.items():
-                full_toml_str += f"\n[{section}]\n"
+                # 检查这个节是否只包含字典（即嵌套节）
+                # 如果是，不生成顶层的节标题，让 _generate_toml_string 处理嵌套节
+                has_config_fields = any(isinstance(v, ConfigField) for v in schema_fields.values())
+                
+                if has_config_fields:
+                    # 这个节包含配置字段，生成节标题
+                    full_toml_str += f"\n[{section}]\n"
+                
                 full_toml_str += self._generate_toml_string(schema_fields, default_config.get(section, {}), "", section)
             
             try:
@@ -1198,92 +1174,6 @@ class google_search_simple(BasePlugin):
         except Exception as e:
             logger.error(f"{self.log_prefix} 加载配置文件失败: {e}，将使用默认配置。")
             self.config = default_config
-
-        # 将 WebUI 可能写入的点号键还原为嵌套结构（例如 engines -> "tavily.api_keys"）
-        def _normalize_dotted_keys(obj: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
-            def _deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
-                for mk, mv in src.items():
-                    if mk in dst and isinstance(dst[mk], dict) and isinstance(mv, dict):
-                        _deep_merge(dst[mk], mv)
-                    else:
-                        dst[mk] = mv
-
-            changed = False
-            result: Dict[str, Any] = {}
-            dotted_items: List[Tuple[str, Any]] = []
-
-            # 先处理非点号键
-            for k, v in obj.items():
-                if "." in k:
-                    dotted_items.append((k, v))
-                    continue
-                if isinstance(v, dict):
-                    new_v, sub_changed = _normalize_dotted_keys(v)
-                    result[k] = new_v
-                    changed = changed or sub_changed
-                else:
-                    result[k] = v
-
-            # 再处理点号键
-            for dotted_key, v in dotted_items:
-                parts = dotted_key.split(".")
-                if "" in parts:
-                    logger.warning(f"{self.log_prefix} 键路径包含空段: '{dotted_key}'")
-                    parts = [p for p in parts if p]
-                if not parts:
-                    logger.warning(f"{self.log_prefix} 忽略空键路径: '{dotted_key}'")
-                    continue
-                current = result
-                # 中间层
-                for idx, part in enumerate(parts[:-1]):
-                    if part in current and not isinstance(current[part], dict):
-                        path_ctx = ".".join(parts[: idx + 1])
-                        logger.warning(f"{self.log_prefix} 键冲突：{part} 已存在且非字典，覆盖为字典以展开 {dotted_key} (路径 {path_ctx})")
-                        current[part] = {}
-                    current = current.setdefault(part, {})
-                # 最后一层
-                last_part = parts[-1]
-                merged_value = _normalize_dotted_keys(v)[0] if isinstance(v, dict) else v
-                if last_part in current and isinstance(current[last_part], dict) and isinstance(merged_value, dict):
-                    _deep_merge(current[last_part], merged_value)
-                else:
-                    current[last_part] = merged_value
-                changed = True
-
-            return result, changed
-
-        # 根据 schema 纠正类型（特别是 list 字段被 WebUI 当作字符串保存时）
-        def _coerce_types(schema_part: Dict[str, Any], config_part: Dict[str, Any]) -> bool:
-            changed = False
-            for key, schema_val in schema_part.items():
-                if isinstance(schema_val, ConfigField):
-                    if key in config_part:
-                        if schema_val.type == list and isinstance(config_part[key], str):
-                            # WebUI 可能用逗号分隔字符串存储，转回列表
-                            config_part[key] = [item.strip() for item in config_part[key].split(",") if item.strip()]
-                            changed = True
-                elif isinstance(schema_val, dict):
-                    if key in config_part and isinstance(config_part[key], dict):
-                        sub_changed = _coerce_types(schema_val, config_part[key])
-                        changed = changed or sub_changed
-            return changed
-
-        self.config, dotted_changed = _normalize_dotted_keys(self.config)
-        type_changed = _coerce_types(self.config_schema, self.config)
-
-        # 回写规范化后的配置，避免文件中残留 "tavily.api_keys" 这类扁平键
-        if (dotted_changed or type_changed) and self.plugin_dir:
-            try:
-                full_toml_str = f"# {self.plugin_name} - 规范化后的配置文件\n"
-                full_toml_str += f"# {self.get_manifest_info('description', '插件配置文件')}\n"
-                for section, schema_fields in self.config_schema.items():
-                    full_toml_str += f"\n[{section}]\n"
-                    full_toml_str += self._generate_toml_string(schema_fields, self.config.get(section, {}), "", section)
-                with open(os.path.join(self.plugin_dir, self.config_file_name), "w", encoding="utf-8") as f:
-                    f.write(full_toml_str)
-                logger.info(f"{self.log_prefix} 已回写规范化配置，移除扁平键与错误类型")
-            except (IOError, OSError) as e:
-                logger.warning(f"{self.log_prefix} 回写规范化配置失败: {e}")
 
         # 从配置中更新 enable_plugin 状态
         if "plugin" in self.config and "enabled" in self.config["plugin"]:
