@@ -94,11 +94,11 @@ class WebSearchTool(BaseTool):
             "max_results": backend_config.get("max_results", 10)
         }
         
-        google_config = {**engines_config.get("google", {}), **common_config}
-        bing_config = {**engines_config.get("bing", {}), **common_config}
-        sogou_config = {**engines_config.get("sogou", {}), **common_config}
-        duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
-        tavily_config = {**engines_config.get("tavily", {}), **common_config}
+        google_config = {**common_config, **engines_config.get("google", {})}
+        bing_config = {**common_config, **engines_config.get("bing", {})}
+        sogou_config = {**common_config, **engines_config.get("sogou", {})}
+        duckduckgo_config = {**common_config, **engines_config.get("duckduckgo", {})}
+        tavily_config = {**common_config, **engines_config.get("tavily", {})}
 
         self.google = GoogleEngine(google_config)
         self.bing = BingEngine(bing_config)
@@ -812,9 +812,9 @@ class ImageSearchAction(BaseAction):
         }
 
         # 初始化所有图片搜索引擎（Bing和搜狗国内可直接访问）
-        bing_config = {**engines_config.get("bing", {}), **common_config}
-        sogou_config = {**engines_config.get("sogou", {}), **common_config}
-        duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
+        bing_config = {**common_config, **engines_config.get("bing", {})}
+        sogou_config = {**common_config, **engines_config.get("sogou", {})}
+        duckduckgo_config = {**common_config, **engines_config.get("duckduckgo", {})}
 
         self.bing = BingEngine(bing_config)
         self.sogou = SogouEngine(sogou_config)
@@ -868,7 +868,7 @@ class ImageSearchAction(BaseAction):
                         break
                     logger.info(f"{name}未找到结果，尝试下一个引擎")
                 except Exception as e:
-                    logger.warning(f"{name}图片搜索失败: {e}，尝试下一个引擎")
+                    logger.warning(f"{name}图片搜索失败: {e}，尝试下一个引擎", exc_info=True)
                     continue
 
             if not image_results:
