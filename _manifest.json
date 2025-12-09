@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "name": "麦麦联网插件（search plugin）",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "支持多个搜索引擎的网络搜索以及聚合翻译搜索以及图片搜索插件，具有自动降级功能。",
   "author": {
     "name": "晴空",
@@ -48,7 +48,6 @@
   }
 
 }
-
 
 
 
