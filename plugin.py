@@ -94,11 +94,11 @@ class WebSearchTool(BaseTool):
             "max_results": backend_config.get("max_results", 10)
         }
         
-        google_config = {**engines_config.get("google", {}), **common_config}
-        bing_config = {**engines_config.get("bing", {}), **common_config}
-        sogou_config = {**engines_config.get("sogou", {}), **common_config}
-        duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
-        tavily_config = {**engines_config.get("tavily", {}), **common_config}
+        google_config = {**common_config, **engines_config.get("google", {})}
+        bing_config = {**common_config, **engines_config.get("bing", {})}
+        sogou_config = {**common_config, **engines_config.get("sogou", {})}
+        duckduckgo_config = {**common_config, **engines_config.get("duckduckgo", {})}
+        tavily_config = {**common_config, **engines_config.get("tavily", {})}
 
         self.google = GoogleEngine(google_config)
         self.bing = BingEngine(bing_config)
@@ -784,6 +784,8 @@ class ImageSearchAction(BaseAction):
     
     # 实例属性
     enabled: bool
+    bing: BingEngine
+    sogou: SogouEngine
     duckduckgo: DuckDuckGoEngine
     backend_config: Dict[str, Any]
 
@@ -791,15 +793,15 @@ class ImageSearchAction(BaseAction):
         super().__init__(*args, **kwargs)
         self._image_history: Dict[str, Deque[str]] = {}
         self._image_history_max_size: int = 30
-        
+
         # 检查是否启用图片搜索功能
         enabled_value = self.get_config("actions.image_search.enabled", False)
         self.enabled = bool(enabled_value) if enabled_value is not None else False
-        
+
         if not self.enabled:
             logger.info("图片搜索功能已在配置中禁用")
             return
-        
+
         # 仅在启用时初始化引擎
         config = self.plugin_config
         engines_config = config.get("engines", {})
@@ -808,8 +810,16 @@ class ImageSearchAction(BaseAction):
             "timeout": backend_config.get("timeout", 20),
             "proxy": backend_config.get("proxy")
         }
-        duckduckgo_config = {**engines_config.get("duckduckgo", {}), **common_config}
+
+        # 初始化所有图片搜索引擎（Bing和搜狗国内可直接访问）
+        bing_config = {**common_config, **engines_config.get("bing", {})}
+        sogou_config = {**common_config, **engines_config.get("sogou", {})}
+        duckduckgo_config = {**common_config, **engines_config.get("duckduckgo", {})}
+
+        self.bing = BingEngine(bing_config)
+        self.sogou = SogouEngine(sogou_config)
         self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
+
         self.backend_config = config.get("search_backend", {})
         max_results = self.backend_config.get("max_results")
         if isinstance(max_results, int) and max_results > 0:
@@ -825,12 +835,12 @@ class ImageSearchAction(BaseAction):
         # 检查是否启用
         if not getattr(self, 'enabled', False):
             await self.send_text(
-                "图片搜索功能当前未启用。如需使用，请在配置文件中启用此功能（注意：需要科学上网工具）。",
+                "图片搜索功能当前未启用。如需使用，请在配置文件中启用此功能。",
                 set_reply=True,
                 reply_message=self.action_message
             )
             return False, "图片搜索功能未启用"
-        
+
         query = self.action_data.get("query", "").strip()
         if not query:
             await self.send_text("你想搜什么图片呀？", set_reply=True, reply_message=self.action_message)
@@ -838,10 +848,29 @@ class ImageSearchAction(BaseAction):
 
         try:
             logger.info(f"开始执行图片搜索动作，关键词: {query}")
-            num_results = self.backend_config.get("max_results", 10) # 搜索结果数量配置
-            
-            image_results = await self.duckduckgo.search_images(query, num_results)
-            
+            num_results = self.backend_config.get("max_results", 10)
+
+            # 按顺序尝试搜索引擎：Bing -> 搜狗 -> DuckDuckGo
+            # Bing和搜狗国内可直接访问，DuckDuckGo需要科学上网
+            image_results = []
+            engines = [
+                (self.bing, "Bing"),
+                (self.sogou, "搜狗"),
+                (self.duckduckgo, "DuckDuckGo")
+            ]
+
+            for engine, name in engines:
+                try:
+                    logger.info(f"尝试使用{name}搜索图片: {query}")
+                    image_results = await engine.search_images(query, num_results)
+                    if image_results:
+                        logger.info(f"{name}图片搜索成功，找到 {len(image_results)} 张图片")
+                        break
+                    logger.info(f"{name}未找到结果，尝试下一个引擎")
+                except Exception as e:
+                    logger.warning(f"{name}图片搜索失败: {e}，尝试下一个引擎", exc_info=True)
+                    continue
+
             if not image_results:
                 await self.send_text(f"我没找到关于「{query}」的图片呢。", set_reply=True, reply_message=self.action_message)
                 return False, "未找到图片"
@@ -935,7 +964,7 @@ class google_search_simple(BasePlugin):
     config_schema: Dict[str, Dict[str, Union[ConfigField, Dict]]] = {
         "plugin": {
             "name": ConfigField(type=str, default="google_search", description="插件名称"),
-            "version": ConfigField(type=str, default="3.1.0", description="插件版本"),
+            "version": ConfigField(type=str, default="3.2.0", description="插件版本"),
             "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
         },
         "model_config": {
@@ -946,7 +975,7 @@ class google_search_simple(BasePlugin):
         },
         "actions": {
             "image_search": {
-                "enabled": ConfigField(type=bool, default=False, description="是否启用图片搜索功能。注意：图片搜索需要科学上网工具才能正常使用。"),
+                "enabled": ConfigField(type=bool, default=False, description="是否启用图片搜索功能。支持Bing、搜狗（国内可直接访问）和DuckDuckGo（需科学上网）三个引擎自动降级。"),
             },
         },
         "search_backend": {

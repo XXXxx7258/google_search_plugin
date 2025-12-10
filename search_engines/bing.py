@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from typing import List, Dict, Any, Optional
@@ -239,4 +240,100 @@ class BingEngine(BaseSearchEngine):
             return results[:num_results]
         except Exception as e:
             logger.error(f"Error in Bing search for query {query}: {e}", exc_info=True)
+            return []
+
+    async def search_images(self, query: str, num_results: int) -> List[Dict[str, str]]:
+        """执行Bing图片搜索（国内可直接访问，无需科学上网）
+
+        Args:
+            query: 搜索关键词
+            num_results: 期望的图片数量
+
+        Returns:
+            图片信息字典列表，格式：[{"image": "图片URL", "title": "图片标题", "thumbnail": "缩略图URL"}]
+        """
+        try:
+            params = {
+                "q": query,
+                "first": 1,
+                "count": min(num_results, 150),
+                "cw": 1177,
+                "ch": 826,
+                "FORM": "HDRSC2"
+            }
+
+            # 尝试多个Bing图片搜索域名
+            html = ""
+            successful_base_url = ""
+            for base_url in self.base_urls:
+                try:
+                    search_url = f"{base_url}/images/search?{urlencode(params)}"
+                    logger.debug(f"请求Bing图片搜索URL: {search_url}")
+                    html = await self._get_html(search_url)
+                    if html and ("img_cont" in html or "iusc" in html):
+                        successful_base_url = base_url
+                        break
+                except Exception as e:
+                    logger.warning(f"Bing图片搜索域名 {base_url} 失败: {e}")
+                    continue
+
+            if not html:
+                logger.warning(f"Bing图片搜索未获取到有效HTML: {query}")
+                return []
+
+            soup = BeautifulSoup(html, "html.parser")
+            results = []
+
+            # 解析图片结果 - Bing图片搜索的HTML结构
+            image_elements = soup.select("a.iusc")
+
+            for elem in image_elements[:num_results]:
+                try:
+                    # 尝试从m属性获取JSON数据
+                    m_attr = elem.get("m")
+                    if m_attr:
+                        try:
+                            m_data = json.loads(m_attr)
+                            image_url = m_data.get("murl", "")
+                            thumbnail_url = m_data.get("turl", "")
+                            title = m_data.get("t", "")
+
+                            if image_url and image_url.startswith(("http://", "https://")):
+                                results.append({
+                                    "image": image_url,
+                                    "title": title or query,
+                                    "thumbnail": thumbnail_url or image_url
+                                })
+                                continue
+                        except json.JSONDecodeError:
+                            # JSON解析失败，尝试备用方法
+                            pass
+
+                    # 备用解析：从img标签获取
+                    img_elem = elem.find("img")
+                    if img_elem:
+                        image_url = img_elem.get("src") or img_elem.get("data-src")
+                        if image_url:
+                            # 处理相对路径
+                            if image_url.startswith("//"):
+                                image_url = "https:" + image_url
+                            elif image_url.startswith("/") and successful_base_url:
+                                image_url = f"{successful_base_url}{image_url}"
+
+                            if image_url.startswith(("http://", "https://")):
+                                title = img_elem.get("alt") or query
+                                results.append({
+                                    "image": image_url,
+                                    "title": title,
+                                    "thumbnail": image_url
+                                })
+                except Exception as e:
+                    logger.debug(f"解析Bing图片元素失败: {e}")
+                    continue
+
+            logger.debug(f"Bing图片搜索找到 {len(results)} 张图片: {query}")
+            return results[:num_results]
+
+        except Exception as e:
+            logger.error(f"Bing图片搜索错误: {query} - {e}", exc_info=True)
             return []
