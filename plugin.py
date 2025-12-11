@@ -1,4 +1,3 @@
-import os
 import asyncio
 import random
 import time
@@ -8,16 +7,12 @@ import base64
 import warnings
 import textwrap
 from collections import deque
-from typing import List, Tuple, Type, Dict, Any, Optional, Union, Deque
-from urllib.parse import urlparse, unquote, parse_qs, parse_qsl, urlencode
-from dataclasses import dataclass
+from typing import List, Tuple, Type, Dict, Any, Optional, Deque
+from urllib.parse import urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
 from readability import Document
-
-# 抑制readability的ruthless removal警告
-warnings.filterwarnings("ignore", message=".*ruthless removal.*")
 
 from src.common.logger import get_logger
 from src.common.database.database_model import ChatHistory
@@ -33,22 +28,67 @@ from src.plugin_system import (
     ConfigField,
     ToolParamType,
     llm_api,
-    message_api
+    message_api,
 )
-from src.plugin_system.base.config_types import ConfigSection
-
-# 导入搜索引擎
 from .search_engines.base import SearchResult
 from .search_engines.google import GoogleEngine
 from .search_engines.bing import BingEngine
 from .search_engines.sogou import SogouEngine
 from .search_engines.duckduckgo import DuckDuckGoEngine
 from .search_engines.tavily import TavilyEngine
-
-# 导入翻译工具
 from .tools.abbreviation_tool import AbbreviationTool
 
+# 抑制readability的ruthless removal警告
+warnings.filterwarnings("ignore", message=".*ruthless removal.*")
+
 logger = get_logger("google_search")
+
+
+def _build_engine_config(engine_name: str, engines_config: Dict[str, Any], common_config: Dict[str, Any]) -> Dict[str, Any]:
+    """集中生成各搜索引擎的配置，避免重复散落。"""
+    cfg = {**common_config}
+    if engine_name == "google":
+        cfg.update(
+            {
+                "enabled": engines_config.get("google_enabled", False),
+                "language": engines_config.get("google_language", "zh-cn"),
+            }
+        )
+    elif engine_name == "bing":
+        cfg.update(
+            {
+                "enabled": engines_config.get("bing_enabled", True),
+                "region": engines_config.get("bing_region", "zh-CN"),
+            }
+        )
+    elif engine_name == "sogou":
+        cfg.update({"enabled": engines_config.get("sogou_enabled", True)})
+    elif engine_name == "duckduckgo":
+        cfg.update(
+            {
+                "enabled": engines_config.get("duckduckgo_enabled", True),
+                "region": engines_config.get("duckduckgo_region", "wt-wt"),
+                "backend": engines_config.get("duckduckgo_backend", "auto"),
+                "safesearch": engines_config.get("duckduckgo_safesearch", "moderate"),
+                "timelimit": None
+                if engines_config.get("duckduckgo_timelimit", "") in ("", "none")
+                else engines_config.get("duckduckgo_timelimit"),
+            }
+        )
+    elif engine_name == "tavily":
+        cfg.update(
+            {
+                "enabled": engines_config.get("tavily_enabled", False),
+                "api_keys": engines_config.get("tavily_api_keys", []),
+                "api_key": engines_config.get("tavily_api_key", ""),
+                "search_depth": engines_config.get("tavily_search_depth", "basic"),
+                "include_raw_content": engines_config.get("tavily_include_raw_content", False),
+                "include_answer": engines_config.get("tavily_include_answer", True),
+                "topic": engines_config.get("tavily_topic", ""),
+                "turbo": engines_config.get("tavily_turbo", False),
+            }
+        )
+    return cfg
 
 class WebSearchTool(BaseTool):
     """Web 搜索工具"""
@@ -93,12 +133,12 @@ class WebSearchTool(BaseTool):
             "proxy": backend_config.get("proxy"),
             "max_results": backend_config.get("max_results", 10)
         }
-        
-        google_config = {**common_config, **engines_config.get("google", {})}
-        bing_config = {**common_config, **engines_config.get("bing", {})}
-        sogou_config = {**common_config, **engines_config.get("sogou", {})}
-        duckduckgo_config = {**common_config, **engines_config.get("duckduckgo", {})}
-        tavily_config = {**common_config, **engines_config.get("tavily", {})}
+
+        google_config = _build_engine_config("google", engines_config, common_config)
+        bing_config = _build_engine_config("bing", engines_config, common_config)
+        sogou_config = _build_engine_config("sogou", engines_config, common_config)
+        duckduckgo_config = _build_engine_config("duckduckgo", engines_config, common_config)
+        tavily_config = _build_engine_config("tavily", engines_config, common_config)
 
         self.google = GoogleEngine(google_config)
         self.bing = BingEngine(bing_config)
@@ -514,7 +554,6 @@ class WebSearchTool(BaseTool):
         Returns:
             搜索结果列表，如果所有引擎都失败则返回空列表
         """
-        config = self.plugin_config
         engines_config = self.plugin_config.get("engines", {})
         
         # 获取默认搜索引擎顺序
@@ -536,12 +575,11 @@ class WebSearchTool(BaseTool):
         
         # 按顺序尝试搜索引擎
         for engine_name, engine in engine_order:
-            # 检查引擎是否启用
-            # 从 engines 配置节点下读取引擎配置
-            engine_specific_config = self.plugin_config.get("engines", {}).get(engine_name, {})
-            is_enabled = engine_specific_config.get("enabled")
+            # 检查引擎是否启用（平铺字段），缺省时依据默认：google/tavily 默认禁用，其余启用
+            is_enabled = engines_config.get(f"{engine_name}_enabled")
             if is_enabled is None:
-                is_enabled = engine_name != "tavily"
+                defaults = {"google": False, "tavily": False}
+                is_enabled = defaults.get(engine_name, True)
             if not is_enabled:
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
                 continue
@@ -795,7 +833,7 @@ class ImageSearchAction(BaseAction):
         self._image_history_max_size: int = 30
 
         # 检查是否启用图片搜索功能
-        enabled_value = self.get_config("actions.image_search.enabled", False)
+        enabled_value = self.get_config("actions.image_search_enabled", False)
         self.enabled = bool(enabled_value) if enabled_value is not None else False
 
         if not self.enabled:
@@ -812,9 +850,9 @@ class ImageSearchAction(BaseAction):
         }
 
         # 初始化所有图片搜索引擎（Bing和搜狗国内可直接访问）
-        bing_config = {**common_config, **engines_config.get("bing", {})}
-        sogou_config = {**common_config, **engines_config.get("sogou", {})}
-        duckduckgo_config = {**common_config, **engines_config.get("duckduckgo", {})}
+        bing_config = _build_engine_config("bing", engines_config, common_config)
+        sogou_config = _build_engine_config("sogou", engines_config, common_config)
+        duckduckgo_config = _build_engine_config("duckduckgo", engines_config, common_config)
 
         self.bing = BingEngine(bing_config)
         self.sogou = SogouEngine(sogou_config)
@@ -960,26 +998,48 @@ class google_search_simple(BasePlugin):
         "trafilatura>=1.6.0",
     ]
     config_file_name: str = "config.toml"
-    
-    config_schema: Dict[str, Dict[str, Union[ConfigField, Dict]]] = {
+
+    config_schema: Dict[str, Dict[str, ConfigField]] = {
         "plugin": {
             "name": ConfigField(type=str, default="google_search", description="插件名称"),
             "version": ConfigField(type=str, default="3.2.0", description="插件版本"),
             "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
         },
         "model_config": {
-            "model_name": ConfigField(type=str, default="replyer", description="指定用于搜索和总结的系统模型名称。默认为 'replyer'，即系统主回复模型。"),
+            "model_name": ConfigField(
+                type=str,
+                default="replyer",
+                description="指定用于搜索和总结的系统模型名称。默认为 'replyer'，即系统主回复模型。",
+                choices=[
+                    "replyer",
+                    "utils",
+                    "utils_small",
+                    "tool_use",
+                    "planner",
+                    "vlm",
+                    "lpmm_entity_extract",
+                    "lpmm_rdf_build",
+                    "lpmm_qa",
+                ],
+            ),
             "temperature": ConfigField(type=float, default=0.7, description="模型生成温度。如果留空，则使用所选模型的默认温度。"),
             "context_time_gap": ConfigField(type=int, default=300, description="获取最近多少秒的全局聊天记录作为上下文。"),
             "context_max_limit": ConfigField(type=int, default=15, description="最多获取多少条全局聊天记录作为上下文。"),
         },
         "actions": {
-            "image_search": {
-                "enabled": ConfigField(type=bool, default=False, description="是否启用图片搜索功能。支持Bing、搜狗（国内可直接访问）和DuckDuckGo（需科学上网）三个引擎自动降级。"),
-            },
+            "image_search_enabled": ConfigField(
+                type=bool,
+                default=False,
+                description="是否启用图片搜索功能。支持Bing、搜狗（国内可直接访问）和DuckDuckGo（需科学上网）三个引擎自动降级。",
+            ),
         },
         "search_backend": {
-            "default_engine": ConfigField(type=str, default="bing", description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)"),
+            "default_engine": ConfigField(
+                type=str,
+                default="bing",
+                description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)",
+                choices=["google", "bing", "sogou", "duckduckgo", "tavily"],
+            ),
             "max_results": ConfigField(type=int, default=15, description="默认返回结果数量"),
             "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
             "proxy": ConfigField(type=str, default="", description="用于搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。如果留空则不使用代理。"),
@@ -998,34 +1058,29 @@ class google_search_simple(BasePlugin):
             ),
         },
         "engines": {
-            "google": {
-                "enabled": ConfigField(type=bool, default=False, description="是否启用Google搜索"),
-                "language": ConfigField(type=str, default="zh-cn", description="搜索语言"),
-            },
-            "bing": {
-                "enabled": ConfigField(type=bool, default=True, description="是否启用Bing搜索"),
-                "region": ConfigField(type=str, default="zh-CN", description="Bing搜索区域代码"),
-            },
-            "sogou": {
-                "enabled": ConfigField(type=bool, default=True, description="是否启用搜狗搜索"),
-            },
-            "duckduckgo": {
-                "enabled": ConfigField(type=bool, default=True, description="是否启用DDGS元搜索引擎"),
-                "region": ConfigField(type=str, default="wt-wt", description="搜索区域代码，例如 'us-en' 或 'cn-zh'"),
-                "backend": ConfigField(type=str, default="auto", description="使用的后端。'auto' 表示自动选择，也可以指定多个，如 'duckduckgo,google,brave'"),
-                "safesearch": ConfigField(type=str, default="moderate", choices=["on", "moderate", "off"], description="安全搜索级别"),
-                "timelimit": ConfigField(type=str, default="", description="时间限制 (d, w, m, y)"),
-            },
-            "tavily": {
-                "enabled": ConfigField(type=bool, default=False, description="是否启用 Tavily 搜索"),
-                "api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时用,分隔即可，随机选用"),
-                "api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
-                "search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
-                "include_raw_content": ConfigField(type=bool, default=False, description="是否返回网页原始内容"),
-                "include_answer": ConfigField(type=bool, default=True, description="是否返回 Tavily 生成的答案"),
-                "topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'"),
-                "turbo": ConfigField(type=bool, default=False, description="是否启用 Tavily Turbo 模式"),
-            },
+            "google_enabled": ConfigField(type=bool, default=False, description="是否启用Google搜索"),
+            "google_language": ConfigField(type=str, default="zh-cn", description="搜索语言"),
+            "bing_enabled": ConfigField(type=bool, default=True, description="是否启用Bing搜索"),
+            "bing_region": ConfigField(type=str, default="zh-CN", description="Bing搜索区域代码"),
+            "sogou_enabled": ConfigField(type=bool, default=True, description="是否启用搜狗搜索"),
+            "duckduckgo_enabled": ConfigField(type=bool, default=True, description="是否启用DDGS元搜索引擎"),
+            "duckduckgo_region": ConfigField(type=str, default="wt-wt", description="搜索区域代码，例如 'us-en' 或 'cn-zh'"),
+            "duckduckgo_backend": ConfigField(type=str, default="auto", description="使用的后端。'auto' 表示自动选择，也可以指定多个，如 'duckduckgo,google,brave'"),
+            "duckduckgo_safesearch": ConfigField(type=str, default="moderate", choices=["on", "moderate", "off"], description="安全搜索级别"),
+            "duckduckgo_timelimit": ConfigField(
+                type=str,
+                default="none",
+                description="时间限制 (d, w, m, y；none 表示不限)",
+                choices=["none", "d", "w", "m", "y"],
+            ),
+            "tavily_enabled": ConfigField(type=bool, default=False, description="是否启用 Tavily 搜索"),
+            "tavily_api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时用,分隔即可，随机选用"),
+            "tavily_api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
+            "tavily_search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
+            "tavily_include_raw_content": ConfigField(type=bool, default=False, description="是否返回网页原始内容"),
+            "tavily_include_answer": ConfigField(type=bool, default=True, description="是否返回 Tavily 生成的答案"),
+            "tavily_topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'"),
+            "tavily_turbo": ConfigField(type=bool, default=False, description="是否启用 Tavily Turbo 模式"),
         },
         "storage": {
             "enable_store": ConfigField(type=bool, default=True, description="是否将搜索结果写入 chat_history"),
@@ -1047,7 +1102,7 @@ class google_search_simple(BasePlugin):
         ]
         
         # 仅在配置启用时注册图片搜索动作
-        if self.config.get("actions", {}).get("image_search", {}).get("enabled", False):
+        if self.get_config("actions.image_search_enabled", False):
             components.append((ImageSearchAction.get_action_info(), ImageSearchAction))
             logger.info(f"{self.log_prefix} 图片搜索功能已启用并注册")
         else:
@@ -1055,282 +1110,6 @@ class google_search_simple(BasePlugin):
         
         return components
 
-    def get_webui_config_schema(self) -> Dict[str, Any]:
-        """
-        递归展开嵌套 schema，生成 WebUI 可识别的完整配置 schema。
-        仅改插件侧，避免框架丢弃子层字段（如 actions/engines 内的 ConfigField）。
-        """
-        schema: Dict[str, Any] = {
-            "plugin_id": self.plugin_name,
-            "plugin_info": {
-                "name": self.display_name,
-                "version": self.plugin_version,
-                "description": self.plugin_description,
-                "author": self.plugin_author,
-            },
-            "sections": {},
-            "layout": {"type": "auto", "tabs": []},
-        }
-
-        def ensure_section(section_name: str) -> Dict[str, Any]:
-            if section_name in schema["sections"]:
-                return schema["sections"][section_name]
-
-            section_data: Dict[str, Any] = {
-                "name": section_name,
-                "title": section_name,
-                "description": None,
-                "icon": None,
-                "collapsed": False,
-                "order": 0,
-                "fields": {},
-            }
-
-            # 继承基类的 section 元数据
-            section_meta = getattr(self, "config_section_descriptions", {}).get(section_name)
-            if section_meta:
-                if isinstance(section_meta, str):
-                    section_data["title"] = section_meta
-                elif isinstance(section_meta, ConfigSection):
-                    section_data["title"] = section_meta.title
-                    section_data["description"] = section_meta.description
-                    section_data["icon"] = section_meta.icon
-                    section_data["collapsed"] = section_meta.collapsed
-                    section_data["order"] = section_meta.order
-                elif isinstance(section_meta, dict):
-                    section_data.update(section_meta)
-
-            schema["sections"][section_name] = section_data
-            return section_data
-
-        def flatten_fields(section_name: str, fields: Dict[str, Any], prefix: str = "") -> None:
-            section_data = ensure_section(section_name)
-            for field_name, field_def in fields.items():
-                full_name = f"{prefix}{field_name}" if prefix else field_name
-                if isinstance(field_def, ConfigField):
-                    field_data = field_def.to_dict()
-                    field_data["name"] = full_name
-                    # 使用 group 把同一子层的字段归类
-                    if prefix:
-                        field_data.setdefault("group", prefix.rstrip("."))
-                    section_data["fields"][full_name] = field_data
-                elif isinstance(field_def, dict):
-                    # 继续在同一 section 内递归，字段命名使用路径
-                    flatten_fields(section_name, field_def, f"{full_name}.")
-                else:
-                    logger.warning(f"{self.log_prefix} 未知字段类型已跳过: {full_name} ({type(field_def)})")
-
-        for section_name, section_fields in self.config_schema.items():
-            if isinstance(section_fields, dict):
-                flatten_fields(section_name, section_fields)
-
-        return schema
-
-    def _get_default_config_from_schema(self, schema_part: Dict[str, Any]) -> Dict[str, Any]:
-        """递归地从 schema 生成默认配置字典
-        
-        Args:
-            schema_part: 配置schema的一部分
-            
-        Returns:
-            默认配置字典
-        """
-        config = {}
-        for key, value in schema_part.items():
-            if isinstance(value, ConfigField):
-                config[key] = value.default
-            elif isinstance(value, dict):
-                config[key] = self._get_default_config_from_schema(value)
-        return config
-
-    def _generate_toml_string(self, schema_part: Dict[str, Any], config_part: Dict[str, Any], indent: str = "", parent_path: str = "") -> str:
-        """递归地生成带注释的 toml 字符串
-        
-        Args:
-            schema_part: 配置 schema 的一部分
-            config_part: 配置值的一部分
-            indent: 缩进字符串（已废弃，保留用于兼容性）
-            parent_path: 父级路径，用于生成正确的 TOML 节点路径
-        """
-        import json
-        toml_str = ""
-        for key, schema_value in schema_part.items():
-            if isinstance(schema_value, ConfigField):
-                # 写字段注释和值
-                toml_str += f"\n# {schema_value.description}\n"
-                if schema_value.example:
-                    toml_str += f"# 示例: {schema_value.example}\n"
-                if schema_value.choices:
-                    toml_str += f"# 可选值: {', '.join(map(str, schema_value.choices))}\n"
-                
-                value = config_part.get(key, schema_value.default)
-                
-                # 使用 json.dumps 来安全地序列化值，特别是列表
-                if isinstance(value, str):
-                    toml_str += f'{key} = "{value}"\n'
-                elif isinstance(value, list):
-                    toml_str += f"{key} = {json.dumps(value, ensure_ascii=False)}\n"
-                else: # bool, int, float
-                    toml_str += f"{key} = {json.dumps(value)}\n"
-
-            elif isinstance(schema_value, dict):
-                # 构建完整的节点路径
-                current_path = f"{parent_path}.{key}" if parent_path else key
-                # 写子节（使用完整路径）
-                toml_str += f"\n[{current_path}]\n"
-                # 递归生成子节点内容，传递当前路径作为新的父路径
-                toml_str += self._generate_toml_string(schema_value, config_part.get(key, {}), indent, current_path)
-        return toml_str
-
     def _load_plugin_config(self) -> None:
-        """覆盖基类的配置加载方法，以正确处理嵌套配置"""
-        import toml
-
-        if not self.config_file_name:
-            logger.debug(f"{self.log_prefix} 未指定配置文件，跳过加载")
-            return
-
-        if not self.plugin_dir or not os.path.isdir(self.plugin_dir):
-            logger.error(f"{self.log_prefix} 插件目录路径无效或未提供，配置加载失败。")
-            self.config = self._get_default_config_from_schema(self.config_schema)
-            return
-
-        config_file_path = os.path.join(self.plugin_dir, self.config_file_name)
-        default_config = self._get_default_config_from_schema(self.config_schema)
-
-        # 如果文件不存在，则创建
-        if not os.path.exists(config_file_path):
-            logger.info(f"{self.log_prefix} 配置文件不存在，将生成完整的默认配置。")
-            full_toml_str = f"# {self.plugin_name} - 自动生成的配置文件\n"
-            full_toml_str += f"# {self.get_manifest_info('description', '插件配置文件')}\n"
-            
-            for section, schema_fields in self.config_schema.items():
-                full_toml_str += f"\n[{section}]\n"
-                full_toml_str += self._generate_toml_string(schema_fields, default_config.get(section, {}), "", section)
-            
-            try:
-                with open(config_file_path, "w", encoding="utf-8") as f:
-                    f.write(full_toml_str)
-                logger.info(f"{self.log_prefix} 已生成默认配置文件: {config_file_path}")
-                self.config = default_config
-            except IOError as e:
-                logger.error(f"{self.log_prefix} 保存默认配置文件失败: {e}", exc_info=True)
-                self.config = default_config # 即使保存失败，也使用默认配置运行
-            
-            return # 结束
-
-        # 如果文件存在，则加载
-        try:
-            with open(config_file_path, "r", encoding="utf-8") as f:
-                self.config = toml.load(f)
-            logger.debug(f"{self.log_prefix} 配置已从 {config_file_path} 加载")
-        except Exception as e:
-            logger.error(f"{self.log_prefix} 加载配置文件失败: {e}，将使用默认配置。")
-            self.config = default_config
-
-        # 将 WebUI 可能写入的点号键还原为嵌套结构（例如 engines -> "tavily.api_keys"）
-        def _normalize_dotted_keys(obj: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
-            def _deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
-                for mk, mv in src.items():
-                    if mk in dst and isinstance(dst[mk], dict) and isinstance(mv, dict):
-                        _deep_merge(dst[mk], mv)
-                    else:
-                        dst[mk] = mv
-
-            changed = False
-            result: Dict[str, Any] = {}
-            dotted_items: List[Tuple[str, Any]] = []
-
-            # 先处理非点号键
-            for k, v in obj.items():
-                if "." in k:
-                    dotted_items.append((k, v))
-                    continue
-                if isinstance(v, dict):
-                    new_v, sub_changed = _normalize_dotted_keys(v)
-                    result[k] = new_v
-                    changed = changed or sub_changed
-                else:
-                    result[k] = v
-
-            # 再处理点号键
-            for dotted_key, v in dotted_items:
-                parts = dotted_key.split(".")
-                if "" in parts:
-                    logger.warning(f"{self.log_prefix} 键路径包含空段: '{dotted_key}'")
-                    parts = [p for p in parts if p]
-                if not parts:
-                    logger.warning(f"{self.log_prefix} 忽略空键路径: '{dotted_key}'")
-                    continue
-                current = result
-                # 中间层
-                for idx, part in enumerate(parts[:-1]):
-                    if part in current and not isinstance(current[part], dict):
-                        path_ctx = ".".join(parts[: idx + 1])
-                        logger.warning(f"{self.log_prefix} 键冲突：{part} 已存在且非字典，覆盖为字典以展开 {dotted_key} (路径 {path_ctx})")
-                        current[part] = {}
-                    current = current.setdefault(part, {})
-                # 最后一层
-                last_part = parts[-1]
-                merged_value = _normalize_dotted_keys(v)[0] if isinstance(v, dict) else v
-                if last_part in current and isinstance(current[last_part], dict) and isinstance(merged_value, dict):
-                    _deep_merge(current[last_part], merged_value)
-                else:
-                    current[last_part] = merged_value
-                changed = True
-
-            return result, changed
-
-        # 根据 schema 纠正类型（特别是 list 字段被 WebUI 当作字符串保存时）
-        def _coerce_types(schema_part: Dict[str, Any], config_part: Dict[str, Any]) -> bool:
-            changed = False
-            for key, schema_val in schema_part.items():
-                if isinstance(schema_val, ConfigField):
-                    if key in config_part:
-                        if schema_val.type == list and isinstance(config_part[key], str):
-                            # WebUI 可能用逗号分隔字符串存储，转回列表
-                            config_part[key] = [item.strip() for item in config_part[key].split(",") if item.strip()]
-                            changed = True
-                elif isinstance(schema_val, dict):
-                    if key in config_part and isinstance(config_part[key], dict):
-                        sub_changed = _coerce_types(schema_val, config_part[key])
-                        changed = changed or sub_changed
-            return changed
-
-        self.config, dotted_changed = _normalize_dotted_keys(self.config)
-        type_changed = _coerce_types(self.config_schema, self.config)
-
-        # 回写规范化后的配置，避免文件中残留 "tavily.api_keys" 这类扁平键
-        if (dotted_changed or type_changed) and self.plugin_dir:
-            try:
-                full_toml_str = f"# {self.plugin_name} - 规范化后的配置文件\n"
-                full_toml_str += f"# {self.get_manifest_info('description', '插件配置文件')}\n"
-                for section, schema_fields in self.config_schema.items():
-                    full_toml_str += f"\n[{section}]\n"
-                    full_toml_str += self._generate_toml_string(schema_fields, self.config.get(section, {}), "", section)
-                with open(os.path.join(self.plugin_dir, self.config_file_name), "w", encoding="utf-8") as f:
-                    f.write(full_toml_str)
-                logger.info(f"{self.log_prefix} 已回写规范化配置，移除扁平键与错误类型")
-            except (IOError, OSError) as e:
-                logger.warning(f"{self.log_prefix} 回写规范化配置失败: {e}")
-
-        # 从配置中更新 enable_plugin 状态
-        if "plugin" in self.config and "enabled" in self.config["plugin"]:
-            self.enable_plugin = self.config["plugin"]["enabled"]
-            logger.debug(f"{self.log_prefix} 从配置更新插件启用状态: {self.enable_plugin}")
-
-        # 向后兼容：补全新增的 storage 与 plugin.version 默认值
-        if "storage" not in self.config:
-            self.config["storage"] = default_config.get("storage", {})
-        else:
-            # 为缺失的 storage 子项补默认值
-            for k, v in default_config.get("storage", {}).items():
-                self.config["storage"].setdefault(k, v)
-
-        if "plugin" in self.config:
-            self.config["plugin"].setdefault("version", default_config["plugin"]["version"])
-        else:
-            self.config["plugin"] = default_config["plugin"]
-
-
-
+        """使用基类加载配置（平铺 schema 无需自定义处理）。"""
+        super()._load_plugin_config()
