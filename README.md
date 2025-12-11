@@ -36,7 +36,8 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 此插件默认使用系统配置的主模型进行智能搜索，但你也可以通过以下配置项进行微调。
 
 ### `[model_config]`
-- `model_name` (str): 指定一个在系统配置中存在的模型名称，用于本次搜索。默认为 "replyer"，即系统主回复模型。如果指定的模型不存在，会自动回退到主回复模型。
+- `model_name` (str, 下拉 choices): 指定用于搜索/总结的模型。可选：
+  `replyer`, `utils`, `utils_small`, `tool_use`, `planner`, `vlm`, `lpmm_entity_extract`, `lpmm_rdf_build`, `lpmm_qa`。默认 `replyer`。
 - `temperature` (float): 单独设置本次搜索时模型的温度。默认为 0.7。
 - `context_time_gap` (int): 获取最近多少秒的**全局**聊天记录作为上下文。默认 300。
 - `context_max_limit` (int): 最多获取多少条**全局**聊天记录作为上下文。默认 15。
@@ -44,7 +45,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ### `[search_backend]`
 这里配置供模型调用的“后端”搜索引擎的行为。
 
-- `default_engine` (str): 默认使用的搜索引擎 (`google`, `bing`, `sogou`, `duckduckgo`, `tavily`)。
+- `default_engine` (str, 下拉 choices): 默认使用的搜索引擎 (`google`, `bing`, `sogou`, `duckduckgo`, `tavily`)。
 - `max_results` (int): 每次搜索返回给模型阅读的结果数量。
 - `timeout` (int): 后端搜索引擎的超时时间。
 - `proxy` (str): 用于后端搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。默认为空字符串，表示不使用代理。
@@ -55,19 +56,23 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ### `[engines]`
 对每个具体搜索引擎的可选配置项：
 
-- `google.enabled` (bool): 是否启用 Google。
-- `bing.enabled` (bool): 是否启用 Bing。
-- `sogou.enabled` (bool): 是否启用搜狗。
-- `duckduckgo.enabled` (bool): 是否启用 DuckDuckGo。
-- `tavily.enabled` (bool): 是否启用 Tavily（需要提供 API key）。
-- `tavily.api_keys` (list[str]): Tavily API key 列表，填写多个时会随机选取一个使用。
-- `tavily.api_key` (str): 单个 Tavily API key，可作为后备值；也可以通过环境变量 `TAVILY_API_KEY` 读取。
-- `tavily.include_answer` (bool): 是否直接使用 Tavily 返回的汇总答案（默认开启，不再额外抓取网页）。
-- `tavily.include_raw_content` (bool): 是否让 Tavily 返回网页正文片段供总结使用。
-- `tavily.search_depth` (str): 搜索深度，可选 `basic` 或 `advanced`。
-- `tavily.topic` (str): Tavily 的主题参数，例如 `general` 或 `news`。
-- `tavily.turbo` (bool): 是否开启 Tavily Turbo 模式。
-- ... 其他特定引擎的参数。
+- `google_enabled` (bool, 默认 false): 是否启用 Google。
+- `google_language` (str): Google 搜索语言。
+- `bing_enabled` (bool, 默认 true): 是否启用 Bing。
+- `bing_region` (str): Bing 区域代码。
+- `sogou_enabled` (bool, 默认 true): 是否启用搜狗。
+- `duckduckgo_enabled` (bool, 默认 true): 是否启用 DuckDuckGo。
+- `duckduckgo_region` (str): 区域代码，例如 `wt-wt`、`us-en`。
+- `duckduckgo_backend` (str): 后端，默认 `auto`。
+- `duckduckgo_safesearch` (str, choices: on/moderate/off): 安全级别。
+- `duckduckgo_timelimit` (str, choices: none/d/w/m/y): 时间限制，none 表示不限。
+- `tavily_enabled` (bool): 是否启用 Tavily（需 API key）。
+- `tavily_api_keys` (list[str]) / `tavily_api_key` (str): Tavily key 列表或单个。
+- `tavily_search_depth` (str, choices: basic/advanced): Tavily 搜索深度。
+- `tavily_include_answer` (bool): 是否返回 Tavily 的答案。
+- `tavily_include_raw_content` (bool): 是否返回网页正文片段。
+- `tavily_topic` (str): 主题参数，如 `general` 或 `news`。
+- `tavily_turbo` (bool): Tavily Turbo 模式。
 
 ## 使用说明
 
@@ -90,25 +95,3 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 
 ---
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
