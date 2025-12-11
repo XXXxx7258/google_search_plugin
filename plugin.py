@@ -28,7 +28,7 @@ from src.plugin_system import (
     ConfigField,
     ToolParamType,
     llm_api,
-    message_api
+    message_api,
 )
 from .search_engines.base import SearchResult
 from .search_engines.google import GoogleEngine
@@ -42,6 +42,53 @@ from .tools.abbreviation_tool import AbbreviationTool
 warnings.filterwarnings("ignore", message=".*ruthless removal.*")
 
 logger = get_logger("google_search")
+
+
+def _build_engine_config(engine_name: str, engines_config: Dict[str, Any], common_config: Dict[str, Any]) -> Dict[str, Any]:
+    """集中生成各搜索引擎的配置，避免重复散落。"""
+    cfg = {**common_config}
+    if engine_name == "google":
+        cfg.update(
+            {
+                "enabled": engines_config.get("google_enabled", False),
+                "language": engines_config.get("google_language", "zh-cn"),
+            }
+        )
+    elif engine_name == "bing":
+        cfg.update(
+            {
+                "enabled": engines_config.get("bing_enabled", True),
+                "region": engines_config.get("bing_region", "zh-CN"),
+            }
+        )
+    elif engine_name == "sogou":
+        cfg.update({"enabled": engines_config.get("sogou_enabled", True)})
+    elif engine_name == "duckduckgo":
+        cfg.update(
+            {
+                "enabled": engines_config.get("duckduckgo_enabled", True),
+                "region": engines_config.get("duckduckgo_region", "wt-wt"),
+                "backend": engines_config.get("duckduckgo_backend", "auto"),
+                "safesearch": engines_config.get("duckduckgo_safesearch", "moderate"),
+                "timelimit": None
+                if engines_config.get("duckduckgo_timelimit", "") in ("", "none")
+                else engines_config.get("duckduckgo_timelimit"),
+            }
+        )
+    elif engine_name == "tavily":
+        cfg.update(
+            {
+                "enabled": engines_config.get("tavily_enabled", False),
+                "api_keys": engines_config.get("tavily_api_keys", []),
+                "api_key": engines_config.get("tavily_api_key", ""),
+                "search_depth": engines_config.get("tavily_search_depth", "basic"),
+                "include_raw_content": engines_config.get("tavily_include_raw_content", False),
+                "include_answer": engines_config.get("tavily_include_answer", True),
+                "topic": engines_config.get("tavily_topic", ""),
+                "turbo": engines_config.get("tavily_turbo", False),
+            }
+        )
+    return cfg
 
 class WebSearchTool(BaseTool):
     """Web 搜索工具"""
@@ -87,41 +134,11 @@ class WebSearchTool(BaseTool):
             "max_results": backend_config.get("max_results", 10)
         }
 
-        google_config = {
-            **common_config,
-            "enabled": engines_config.get("google_enabled", False),
-            "language": engines_config.get("google_language", "zh-cn"),
-        }
-        bing_config = {
-            **common_config,
-            "enabled": engines_config.get("bing_enabled", True),
-            "region": engines_config.get("bing_region", "zh-CN"),
-        }
-        sogou_config = {
-            **common_config,
-            "enabled": engines_config.get("sogou_enabled", True),
-        }
-        duckduckgo_config = {
-            **common_config,
-            "enabled": engines_config.get("duckduckgo_enabled", True),
-            "region": engines_config.get("duckduckgo_region", "wt-wt"),
-            "backend": engines_config.get("duckduckgo_backend", "auto"),
-            "safesearch": engines_config.get("duckduckgo_safesearch", "moderate"),
-            "timelimit": None
-            if engines_config.get("duckduckgo_timelimit", "") in ("", "none")
-            else engines_config.get("duckduckgo_timelimit"),
-        }
-        tavily_config = {
-            **common_config,
-            "enabled": engines_config.get("tavily_enabled", False),
-            "api_keys": engines_config.get("tavily_api_keys", []),
-            "api_key": engines_config.get("tavily_api_key", ""),
-            "search_depth": engines_config.get("tavily_search_depth", "basic"),
-            "include_raw_content": engines_config.get("tavily_include_raw_content", False),
-            "include_answer": engines_config.get("tavily_include_answer", True),
-            "topic": engines_config.get("tavily_topic", ""),
-            "turbo": engines_config.get("tavily_turbo", False),
-        }
+        google_config = _build_engine_config("google", engines_config, common_config)
+        bing_config = _build_engine_config("bing", engines_config, common_config)
+        sogou_config = _build_engine_config("sogou", engines_config, common_config)
+        duckduckgo_config = _build_engine_config("duckduckgo", engines_config, common_config)
+        tavily_config = _build_engine_config("tavily", engines_config, common_config)
 
         self.google = GoogleEngine(google_config)
         self.bing = BingEngine(bing_config)
@@ -558,10 +575,11 @@ class WebSearchTool(BaseTool):
         
         # 按顺序尝试搜索引擎
         for engine_name, engine in engine_order:
-            # 检查引擎是否启用（平铺字段）
+            # 检查引擎是否启用（平铺字段），缺省时依据默认：google/tavily 默认禁用，其余启用
             is_enabled = engines_config.get(f"{engine_name}_enabled")
             if is_enabled is None:
-                is_enabled = engine_name != "tavily"
+                defaults = {"google": False, "tavily": False}
+                is_enabled = defaults.get(engine_name, True)
             if not is_enabled:
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
                 continue
@@ -832,25 +850,9 @@ class ImageSearchAction(BaseAction):
         }
 
         # 初始化所有图片搜索引擎（Bing和搜狗国内可直接访问）
-        bing_config = {
-            **common_config,
-            "enabled": engines_config.get("bing_enabled", True),
-            "region": engines_config.get("bing_region", "zh-CN"),
-        }
-        sogou_config = {
-            **common_config,
-            "enabled": engines_config.get("sogou_enabled", True),
-        }
-        duckduckgo_config = {
-            **common_config,
-            "enabled": engines_config.get("duckduckgo_enabled", True),
-            "region": engines_config.get("duckduckgo_region", "wt-wt"),
-            "backend": engines_config.get("duckduckgo_backend", "auto"),
-            "safesearch": engines_config.get("duckduckgo_safesearch", "moderate"),
-            "timelimit": None
-            if engines_config.get("duckduckgo_timelimit", "") in ("", "none")
-            else engines_config.get("duckduckgo_timelimit"),
-        }
+        bing_config = _build_engine_config("bing", engines_config, common_config)
+        sogou_config = _build_engine_config("sogou", engines_config, common_config)
+        duckduckgo_config = _build_engine_config("duckduckgo", engines_config, common_config)
 
         self.bing = BingEngine(bing_config)
         self.sogou = SogouEngine(sogou_config)
@@ -1100,7 +1102,7 @@ class google_search_simple(BasePlugin):
         ]
         
         # 仅在配置启用时注册图片搜索动作
-        if self.config.get("actions", {}).get("image_search_enabled", False):
+        if self.get_config("actions.image_search_enabled", False):
             components.append((ImageSearchAction.get_action_info(), ImageSearchAction))
             logger.info(f"{self.log_prefix} 图片搜索功能已启用并注册")
         else:
