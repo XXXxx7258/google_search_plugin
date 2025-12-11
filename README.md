@@ -93,5 +93,6 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ### 总结
 你只需要自然地与麦麦对话，当她认为需要“上网查一下”的时候，这个插件就会被激活
 
-
+感谢贡献者：https://github.com/heitiehu-beep ,https://github.com/wanshangovo
 ---
+
