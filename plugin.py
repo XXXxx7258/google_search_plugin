@@ -248,14 +248,22 @@ class WebSearchTool(BaseTool):
 
     async def _execute_model_driven_search(self, question: str) -> str:
         """执行模型驱动的智能搜索流程"""
-        # 1. 获取全局上下文
+        # 1. 获取聊天上下文
         time_gap = self.model_config.get("context_time_gap", 300)
         max_limit = self.model_config.get("context_max_limit", 15)
-        context_messages = message_api.get_messages_by_time(
-            start_time=time.time() - time_gap,
-            end_time=time.time(),
-            limit=max_limit
-        )
+        if self.chat_id:
+            context_messages = message_api.get_messages_by_time_in_chat(
+                chat_id=self.chat_id,
+                start_time=time.time() - time_gap,
+                end_time=time.time(),
+                limit=max_limit,
+            )
+        else:
+            context_messages = message_api.get_messages_by_time(
+                start_time=time.time() - time_gap,
+                end_time=time.time(),
+                limit=max_limit,
+            )
         context_str = message_api.build_readable_messages_to_str(context_messages)
 
         # 2. 构建查询重写 Prompt
@@ -802,7 +810,7 @@ class ImageSearchAction(BaseAction):
     action_description: str = "当用户明确需要搜索图片时使用此动作。例如：'搜索一下猫的图片'、'来张风景图'。"
     
     # 激活类型：让LLM来判断是否需要搜索图片
-    activation_type: ActionActivationType = ActionActivationType.LLM_JUDGE
+    activation_type: ActionActivationType = ActionActivationType.ALWAYS
     
     # 关联类型：这个Action会发送图片
     associated_types: List[str] = ["image"]
