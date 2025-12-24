@@ -1083,7 +1083,7 @@ class google_search_simple(BasePlugin):
                 choices=["none", "d", "w", "m", "y"],
             ),
             "tavily_enabled": ConfigField(type=bool, default=False, description="是否启用 Tavily 搜索"),
-            "tavily_api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时用,分隔即可，随机选用"),
+            "tavily_api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时随机选用"),
             "tavily_api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
             "tavily_search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
             "tavily_include_raw_content": ConfigField(type=bool, default=False, description="是否返回网页原始内容"),
