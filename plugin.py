@@ -251,18 +251,20 @@ class WebSearchTool(BaseTool):
         # 1. 获取聊天上下文
         time_gap = self.model_config.get("context_time_gap", 300)
         max_limit = self.model_config.get("context_max_limit", 15)
+        current_time = time.time()
+        query_kwargs = {
+            "start_time": current_time - time_gap,
+            "end_time": current_time,
+            "limit": max_limit,
+        }
         if self.chat_id:
             context_messages = message_api.get_messages_by_time_in_chat(
                 chat_id=self.chat_id,
-                start_time=time.time() - time_gap,
-                end_time=time.time(),
-                limit=max_limit,
+                **query_kwargs,
             )
         else:
             context_messages = message_api.get_messages_by_time(
-                start_time=time.time() - time_gap,
-                end_time=time.time(),
-                limit=max_limit,
+                **query_kwargs,
             )
         context_str = message_api.build_readable_messages_to_str(context_messages)
 
@@ -809,7 +811,7 @@ class ImageSearchAction(BaseAction):
     action_name: str = "image_search"
     action_description: str = "当用户明确需要搜索图片时使用此动作。例如：'搜索一下猫的图片'、'来张风景图'。"
     
-    # 激活类型：让LLM来判断是否需要搜索图片
+    # 激活类型：始终激活图片搜索动作
     activation_type: ActionActivationType = ActionActivationType.ALWAYS
     
     # 关联类型：这个Action会发送图片
