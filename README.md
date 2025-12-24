@@ -37,7 +37,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 ### `[model_config]`
 - `model_name` (str, 下拉 choices): 指定用于搜索/总结的模型。可选：
-  `replyer`, `utils`, `utils_small`, `tool_use`, `planner`, `vlm`, `lpmm_entity_extract`, `lpmm_rdf_build`, `lpmm_qa`。默认 `replyer`。
+  `replyer`, `utils`, `tool_use`, `planner`, `vlm`, `lpmm_entity_extract`, `lpmm_rdf_build`, `lpmm_qa`。默认 `replyer`。
 - `temperature` (float): 单独设置本次搜索时模型的温度。默认为 0.7。
 - `context_time_gap` (int): 获取最近多少秒的**全局**聊天记录作为上下文。默认 300。
 - `context_max_limit` (int): 最多获取多少条**全局**聊天记录作为上下文。默认 15。
@@ -99,5 +99,6 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 感谢[myxxr](https://github.com/myxxr),[wanshangovo](https://github.com/wanshangovo)
 提供的代码优化以及改进
 ---
+
 
 
