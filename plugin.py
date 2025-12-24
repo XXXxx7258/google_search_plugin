@@ -1023,7 +1023,6 @@ class google_search_simple(BasePlugin):
                 choices=[
                     "replyer",
                     "utils",
-                    "utils_small",
                     "tool_use",
                     "planner",
                     "vlm",
