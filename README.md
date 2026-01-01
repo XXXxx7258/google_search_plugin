@@ -2,7 +2,7 @@
 
 这是一个搜索插件，还有缩写翻译，还有图片搜索
 
-更新tavily搜索引擎，很好用
+## 已更新tavily搜索引擎，很好用:)
 
 （tavily搜索引擎可以前往https://app.tavily.com 注册后获得密钥,作者自建的免费注册临时邮箱网址: https://mail.xiaowan.me ）
 
@@ -99,6 +99,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 感谢[myxxr](https://github.com/myxxr),[wanshangovo](https://github.com/wanshangovo)
 提供的代码优化以及改进
 ---
+
 
 
 
