@@ -812,8 +812,9 @@ class ImageSearchAction(BaseAction):
     action_description: str = "当用户明确需要搜索图片时使用此动作。例如：'搜索一下猫的图片'、'来张风景图'。"
     
     # 激活类型：始终激活图片搜索动作
-    activation_type: ActionActivationType = ActionActivationType.ALWAYS
-    
+    associated_types: List[str] = ["image"]
+    parallel_action: bool = False
+
     # 关联类型：这个Action会发送图片
     associated_types: List[str] = ["image"]
     
