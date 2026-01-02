@@ -828,7 +828,7 @@ class ImageSearchAction(BaseAction):
         "当用户明确表示想看、想搜索或想要一张图片时使用。",
         "适用于'搜/找/来一张/发一张xx的图片'等指令。",
         "如果用户只是在普通聊天中提到了某个事物，不代表他想要图片，此时不应使用。",
-        "一次只发送一张最相关的图片。"
+        "一次只随机发送一张图片，30分钟内不重复发送同一图片。"
     ]
     
     # 实例属性
@@ -840,8 +840,9 @@ class ImageSearchAction(BaseAction):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._image_history: Dict[str, Deque[str]] = {}
+        self._image_history: Dict[str, Deque[Tuple[str, float]]] = {}
         self._image_history_max_size: int = 30
+        self._image_repeat_window_seconds: int = 30 * 60
 
         # 检查是否启用图片搜索功能
         enabled_value = self.get_config("actions.image_search_enabled", False)
@@ -942,13 +943,20 @@ class ImageSearchAction(BaseAction):
                 history = deque(maxlen=self._image_history_max_size)
                 self._image_history[query] = history
 
-            candidate_urls = [url for url in image_urls if url not in history]
+            now = time.time()
+            recent_history_urls = {
+                url for url, timestamp in history if now - timestamp < self._image_repeat_window_seconds
+            }
+            candidate_urls = [url for url in image_urls if url not in recent_history_urls]
             if not candidate_urls:
-                history.clear()
-                candidate_urls = image_urls
-                ordered_urls = candidate_urls
-            else:
-                ordered_urls = candidate_urls + [url for url in image_urls if url not in candidate_urls]
+                await self.send_text(
+                    "最近30分钟内已经发过相关图片了，先休息一下吧。",
+                    set_reply=True,
+                    reply_message=self.action_message,
+                )
+                return False, "30分钟内图片重复"
+            random.shuffle(candidate_urls)
+            ordered_urls = candidate_urls
 
             async def _fetch_image(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
                 try:
@@ -971,11 +979,11 @@ class ImageSearchAction(BaseAction):
                         # 发送图片
                         success = await self.send_image(b64_data, set_reply=True, reply_message=self.action_message)
                         if success:
-                            history.append(url)
+                            history.append((url, time.time()))
                             logger.info(f"成功发送了关于「{query}」的图片。")
                             return True, "图片发送成功"
                         else:
-                            history.append(url)
+                            history.append((url, time.time()))
                             logger.error("调用 send_image 失败。")
                             # 即使发送失败也停止，避免发送多张
                             await self.send_text("我下载好了图片，但是发送失败了...", set_reply=True, reply_message=self.action_message)
