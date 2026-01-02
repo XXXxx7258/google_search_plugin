@@ -96,9 +96,10 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ## 鸣谢：
 [MaiBot](https://github.com/MaiM-with-u/MaiBot)
 
-感谢[myxxr](https://github.com/myxxr),[wanshangovo](https://github.com/wanshangovo)
+感谢[heitiehu-beep](https://github.com/heitiehu-beep),[wanshangovo](https://github.com/wanshangovo)
 提供的代码优化以及改进
 ---
+
 
 
 
