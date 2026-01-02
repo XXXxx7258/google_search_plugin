@@ -2,9 +2,9 @@
 
 这是一个搜索插件，还有缩写翻译，还有图片搜索
 
-## 已更新tavily搜索引擎，很好用:)
+## 已更新[tavily](https://app.tavily.com)搜索引擎，很好用:)
 
-（tavily搜索引擎可以前往https://app.tavily.com 注册后获得密钥,作者自建的免费注册临时邮箱网址: https://mail.xiaowan.me ）
+（tavily搜索引擎可以前往[官网](https://app.tavily.com)注册后获得密钥,可以使用作者自建的免费注册临时[邮箱](https://mail.xiaowan.me)注册 ）
 
 <img width="735" height="308" alt="image" src="https://github.com/user-attachments/assets/9bc86124-b3a8-43e0-addb-1884133658c2" />
 
@@ -99,6 +99,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 感谢[heitiehu-beep](https://github.com/heitiehu-beep),[wanshangovo](https://github.com/wanshangovo)
 提供的代码优化以及改进
 ---
+
 
 
 
