@@ -1054,8 +1054,8 @@ class google_search_simple(BasePlugin):
         "search_backend": {
             "default_engine": ConfigField(
                 type=str,
-                default="bing",
-                description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)",
+                default="tavily",
+                description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)，推荐使用tavily避免403错误",
                 choices=["google", "bing", "sogou", "duckduckgo", "tavily"],
             ),
             "max_results": ConfigField(type=int, default=15, description="默认返回结果数量"),
@@ -1091,7 +1091,7 @@ class google_search_simple(BasePlugin):
                 description="时间限制 (d, w, m, y；none 表示不限)",
                 choices=["none", "d", "w", "m", "y"],
             ),
-            "tavily_enabled": ConfigField(type=bool, default=False, description="是否启用 Tavily 搜索"),
+            "tavily_enabled": ConfigField(type=bool, default=True, description="是否启用 Tavily 搜索（推荐使用以避免403错误）"),
             "tavily_api_keys": ConfigField(type=list, default=[], description="Tavily API key 列表，填写多个时随机选用"),
             "tavily_api_key": ConfigField(type=str, default="", description="Tavily API key；留空则使用环境变量 TAVILY_API_KEY"),
             "tavily_search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),

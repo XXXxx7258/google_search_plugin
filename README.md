@@ -2,9 +2,21 @@
 
 这是一个搜索插件，还有缩写翻译，还有图片搜索
 
-## 已更新[tavily](https://app.tavily.com)搜索引擎，很好用:)
+## ⚠️ 解决403错误问题
 
-（tavily搜索引擎可以前往[官网](https://app.tavily.com)注册后获得密钥,可以使用作者自建的免费注册临时[邮箱](https://mail.xiaowan.me)注册 ）
+如果遇到"抓取内容失败.....状态码：403"的错误，请使用[Tavily](https://app.tavily.com)搜索引擎。Tavily搜索能力强大，可以有效避免403错误！
+
+**本插件已将Tavily设置为默认搜索引擎。**
+
+### 如何配置Tavily
+
+1. 前往[Tavily官网](https://app.tavily.com)注册账号并获取API密钥
+2. 可以使用作者自建的免费临时[邮箱](https://mail.xiaowan.me)进行注册
+3. 在插件配置文件的 `[engines]` 部分填入你的API密钥：
+   ```toml
+   tavily_api_key = "your_api_key_here"
+   ```
+4. 确保 `tavily_enabled = true`（默认已启用）
 
 <img width="735" height="308" alt="image" src="https://github.com/user-attachments/assets/9bc86124-b3a8-43e0-addb-1884133658c2" />
 
@@ -66,7 +78,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 - `duckduckgo_backend` (str): 后端，默认 `auto`。
 - `duckduckgo_safesearch` (str, choices: on/moderate/off): 安全级别。
 - `duckduckgo_timelimit` (str, choices: none/d/w/m/y): 时间限制，none 表示不限。
-- `tavily_enabled` (bool): 是否启用 Tavily（需 API key）。
+- `tavily_enabled` (bool): 是否启用 Tavily（需 API key）。**默认启用，推荐使用以避免403错误。**
 - `tavily_api_keys` (list[str]) / `tavily_api_key` (str): Tavily key 列表或单个。
 - `tavily_search_depth` (str, choices: basic/advanced): Tavily 搜索深度。
 - `tavily_include_answer` (bool): 是否返回 Tavily 的答案。
