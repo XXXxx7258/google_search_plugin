@@ -19,6 +19,36 @@ def _collect_api_keys(value: Optional[Any]) -> List[str]:
     return []
 
 
+def _load_you_api_keys(config: Dict[str, Any]) -> List[str]:
+    candidates: List[str] = (
+        _collect_api_keys(config.get("api_keys"))
+        + _collect_api_keys(config.get("api_key"))
+        + _collect_api_keys(os.environ.get("YOU_API_KEY"))
+    )
+    seen = set()
+    unique_keys: List[str] = []
+    for key in candidates:
+        if key and key not in seen:
+            seen.add(key)
+            unique_keys.append(key)
+    return unique_keys
+
+
+class _YouApiKeyMixin:
+    api_keys: List[str]
+
+    def _init_api_keys(self, config: Dict[str, Any]) -> None:
+        self.api_keys = _load_you_api_keys(config)
+
+    def has_api_keys(self) -> bool:
+        return bool(self.api_keys)
+
+    def _pick_api_key(self) -> Optional[str]:
+        if not self.api_keys:
+            return None
+        return random.choice(self.api_keys)
+
+
 def _first_snippet(value: Any) -> str:
     if isinstance(value, list):
         for item in value:
@@ -40,7 +70,7 @@ def _pick_contents(value: Any) -> str:
     return ""
 
 
-class YouSearchEngine(BaseSearchEngine):
+class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
     """You.com search API client."""
 
     BASE_URL = "https://ydc-index.io"
@@ -48,29 +78,7 @@ class YouSearchEngine(BaseSearchEngine):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self.api_keys = self._load_api_keys()
-
-    def has_api_keys(self) -> bool:
-        return bool(self.api_keys)
-
-    def _load_api_keys(self) -> List[str]:
-        candidates: List[str] = (
-            _collect_api_keys(self.config.get("api_keys"))
-            + _collect_api_keys(self.config.get("api_key"))
-            + _collect_api_keys(os.environ.get("YOU_API_KEY"))
-        )
-        seen = set()
-        unique_keys: List[str] = []
-        for key in candidates:
-            if key and key not in seen:
-                seen.add(key)
-                unique_keys.append(key)
-        return unique_keys
-
-    def _pick_api_key(self) -> Optional[str]:
-        if not self.api_keys:
-            return None
-        return random.choice(self.api_keys)
+        self._init_api_keys(self.config)
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
         api_key = self._pick_api_key()
@@ -188,7 +196,7 @@ class YouSearchEngine(BaseSearchEngine):
         return results[: min(len(results), num_results)]
 
 
-class YouLiveNewsEngine(BaseSearchEngine):
+class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
     """You.com live news API client (early access)."""
 
     BASE_URL = "https://api.ydc-index.io"
@@ -196,29 +204,7 @@ class YouLiveNewsEngine(BaseSearchEngine):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self.api_keys = self._load_api_keys()
-
-    def has_api_keys(self) -> bool:
-        return bool(self.api_keys)
-
-    def _load_api_keys(self) -> List[str]:
-        candidates: List[str] = (
-            _collect_api_keys(self.config.get("api_keys"))
-            + _collect_api_keys(self.config.get("api_key"))
-            + _collect_api_keys(os.environ.get("YOU_API_KEY"))
-        )
-        seen = set()
-        unique_keys: List[str] = []
-        for key in candidates:
-            if key and key not in seen:
-                seen.add(key)
-                unique_keys.append(key)
-        return unique_keys
-
-    def _pick_api_key(self) -> Optional[str]:
-        if not self.api_keys:
-            return None
-        return random.choice(self.api_keys)
+        self._init_api_keys(self.config)
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
         api_key = self._pick_api_key()
@@ -298,9 +284,10 @@ class YouLiveNewsEngine(BaseSearchEngine):
         return results[: min(len(results), num_results)]
 
 
-class YouContentsClient:
+class YouContentsClient(_YouApiKeyMixin):
     """You.com contents API client."""
 
+    MAX_URLS_PER_REQUEST = 10
     BASE_URL = "https://ydc-index.io"
     CONTENTS_ENDPOINT = "/v1/contents"
 
@@ -308,31 +295,9 @@ class YouContentsClient:
         self.config = config or {}
         self.TIMEOUT = self.config.get("timeout", 10)
         self.proxy = self.config.get("proxy")
-        self.api_keys = self._load_api_keys()
         self.format = self.config.get("format", "markdown")
         self.force = bool(self.config.get("force", False))
-
-    def has_api_keys(self) -> bool:
-        return bool(self.api_keys)
-
-    def _load_api_keys(self) -> List[str]:
-        candidates: List[str] = (
-            _collect_api_keys(self.config.get("api_keys"))
-            + _collect_api_keys(self.config.get("api_key"))
-            + _collect_api_keys(os.environ.get("YOU_API_KEY"))
-        )
-        seen = set()
-        unique_keys: List[str] = []
-        for key in candidates:
-            if key and key not in seen:
-                seen.add(key)
-                unique_keys.append(key)
-        return unique_keys
-
-    def _pick_api_key(self) -> Optional[str]:
-        if not self.api_keys:
-            return None
-        return random.choice(self.api_keys)
+        self._init_api_keys(self.config)
 
     async def fetch_contents(self, urls: List[str]) -> Dict[str, str]:
         api_key = self._pick_api_key()
@@ -344,6 +309,25 @@ class YouContentsClient:
             return {}
 
         format_value = self.format if self.format in {"html", "markdown"} else "markdown"
+        contents_map: Dict[str, str] = {}
+        batch_size = self.MAX_URLS_PER_REQUEST
+
+        for start in range(0, len(urls), batch_size):
+            batch = [url for url in urls[start:start + batch_size] if url]
+            if not batch:
+                continue
+            batch_map = await self._fetch_contents_batch(batch, format_value, api_key)
+            if batch_map:
+                contents_map.update(batch_map)
+
+        return contents_map
+
+    async def _fetch_contents_batch(
+        self,
+        urls: List[str],
+        format_value: str,
+        api_key: str,
+    ) -> Dict[str, str]:
         payload = {"urls": urls, "format": format_value}
 
         try:
@@ -400,7 +384,7 @@ class YouContentsClient:
         return contents_map
 
 
-class YouImagesEngine(BaseSearchEngine):
+class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
     """You.com images API client (early access)."""
 
     BASE_URL = "https://image-search.ydc-index.io"
@@ -408,29 +392,7 @@ class YouImagesEngine(BaseSearchEngine):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self.api_keys = self._load_api_keys()
-
-    def has_api_keys(self) -> bool:
-        return bool(self.api_keys)
-
-    def _load_api_keys(self) -> List[str]:
-        candidates: List[str] = (
-            _collect_api_keys(self.config.get("api_keys"))
-            + _collect_api_keys(self.config.get("api_key"))
-            + _collect_api_keys(os.environ.get("YOU_API_KEY"))
-        )
-        seen = set()
-        unique_keys: List[str] = []
-        for key in candidates:
-            if key and key not in seen:
-                seen.add(key)
-                unique_keys.append(key)
-        return unique_keys
-
-    def _pick_api_key(self) -> Optional[str]:
-        if not self.api_keys:
-            return None
-        return random.choice(self.api_keys)
+        self._init_api_keys(self.config)
 
     async def search_images(self, query: str, num_results: int) -> List[Dict[str, str]]:
         api_key = self._pick_api_key()
