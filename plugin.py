@@ -1216,7 +1216,7 @@ class google_search_simple(BasePlugin):
             "you_api_keys": ConfigField(type=list, default=[], description="You API key 列表，填写多个时随机选用"),
             "you_api_key": ConfigField(type=str, default="", description="You API key；留空则使用环境变量 YOU_API_KEY"),
             "you_freshness": ConfigField(type=str, default="", description="You 搜索时间范围，例如 day/week/month/year 或日期范围"),
-            "you_offset": ConfigField(type=int, default=0, description="You 搜索分页 offset（0-9）"),
+            "you_offset": ConfigField(type=int, default=0, description="You 搜索分页 offset（0-9，超出将被夹取）"),
             "you_country": ConfigField(type=str, default="", description="You 搜索国家代码（如 CN/US）"),
             "you_language": ConfigField(type=str, default="", description="You 搜索语言（BCP 47，如 EN/zh-Hans）"),
             "you_safesearch": ConfigField(
