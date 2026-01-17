@@ -94,47 +94,33 @@ def _build_engine_config(engine_name: str, engines_config: Dict[str, Any], commo
                 "turbo": engines_config.get("tavily_turbo", False),
             }
         )
-    elif engine_name == "you":
+    elif engine_name in {"you", "you_news", "you_contents", "you_images"}:
         cfg.update(
             {
-                "enabled": engines_config.get("you_enabled", False),
-                "api_keys": engines_config.get("you_api_keys", []),
-                "api_key": engines_config.get("you_api_key", ""),
-                "freshness": engines_config.get("you_freshness", ""),
-                "offset": engines_config.get("you_offset", 0),
-                "country": engines_config.get("you_country", ""),
-                "language": engines_config.get("you_language", ""),
-                "safesearch": engines_config.get("you_safesearch", ""),
-                "livecrawl": engines_config.get("you_livecrawl", ""),
-                "livecrawl_formats": engines_config.get("you_livecrawl_formats", ""),
-            }
-        )
-    elif engine_name == "you_news":
-        cfg.update(
-            {
-                "enabled": engines_config.get("you_news_enabled", False),
+                "enabled": engines_config.get(f"{engine_name}_enabled", False),
                 "api_keys": engines_config.get("you_api_keys", []),
                 "api_key": engines_config.get("you_api_key", ""),
             }
         )
-    elif engine_name == "you_contents":
-        cfg.update(
-            {
-                "enabled": engines_config.get("you_contents_enabled", False),
-                "api_keys": engines_config.get("you_api_keys", []),
-                "api_key": engines_config.get("you_api_key", ""),
-                "format": engines_config.get("you_contents_format", "markdown"),
-                "force": engines_config.get("you_contents_force", False),
-            }
-        )
-    elif engine_name == "you_images":
-        cfg.update(
-            {
-                "enabled": engines_config.get("you_images_enabled", False),
-                "api_keys": engines_config.get("you_api_keys", []),
-                "api_key": engines_config.get("you_api_key", ""),
-            }
-        )
+        if engine_name == "you":
+            cfg.update(
+                {
+                    "freshness": engines_config.get("you_freshness", ""),
+                    "offset": engines_config.get("you_offset", 0),
+                    "country": engines_config.get("you_country", ""),
+                    "language": engines_config.get("you_language", ""),
+                    "safesearch": engines_config.get("you_safesearch", ""),
+                    "livecrawl": engines_config.get("you_livecrawl", ""),
+                    "livecrawl_formats": engines_config.get("you_livecrawl_formats", ""),
+                }
+            )
+        elif engine_name == "you_contents":
+            cfg.update(
+                {
+                    "format": engines_config.get("you_contents_format", "markdown"),
+                    "force": engines_config.get("you_contents_force", False),
+                }
+            )
     return cfg
 
 class WebSearchTool(BaseTool):
@@ -1000,6 +986,7 @@ class ImageSearchAction(BaseAction):
         try:
             logger.info(f"开始执行图片搜索动作，关键词: {query}")
             num_results = self.backend_config.get("max_results", 10)
+            engines_config = self.plugin_config.get("engines", {})
 
             # 按顺序尝试搜索引擎：Bing -> 搜狗 -> DuckDuckGo
             # Bing和搜狗国内可直接访问，DuckDuckGo需要科学上网
@@ -1016,7 +1003,7 @@ class ImageSearchAction(BaseAction):
                     if not engines_config.get("you_images_enabled", False):
                         logger.info("You Images 未启用，跳过调用")
                         continue
-                    if not (hasattr(engine, "has_api_keys") and engine.has_api_keys()):
+                    if not engine.has_api_keys():
                         logger.info("You Images 未配置 API key，跳过调用")
                         continue
                 try:
