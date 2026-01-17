@@ -36,6 +36,12 @@ from .search_engines.bing import BingEngine
 from .search_engines.sogou import SogouEngine
 from .search_engines.duckduckgo import DuckDuckGoEngine
 from .search_engines.tavily import TavilyEngine
+from .search_engines.you import (
+    YouSearchEngine,
+    YouLiveNewsEngine,
+    YouContentsClient,
+    YouImagesEngine,
+)
 from .tools.abbreviation_tool import AbbreviationTool
 
 # 抑制readability的ruthless removal警告
@@ -88,6 +94,47 @@ def _build_engine_config(engine_name: str, engines_config: Dict[str, Any], commo
                 "turbo": engines_config.get("tavily_turbo", False),
             }
         )
+    elif engine_name == "you":
+        cfg.update(
+            {
+                "enabled": engines_config.get("you_enabled", False),
+                "api_keys": engines_config.get("you_api_keys", []),
+                "api_key": engines_config.get("you_api_key", ""),
+                "freshness": engines_config.get("you_freshness", ""),
+                "offset": engines_config.get("you_offset", 0),
+                "country": engines_config.get("you_country", ""),
+                "language": engines_config.get("you_language", ""),
+                "safesearch": engines_config.get("you_safesearch", ""),
+                "livecrawl": engines_config.get("you_livecrawl", ""),
+                "livecrawl_formats": engines_config.get("you_livecrawl_formats", ""),
+            }
+        )
+    elif engine_name == "you_news":
+        cfg.update(
+            {
+                "enabled": engines_config.get("you_news_enabled", False),
+                "api_keys": engines_config.get("you_api_keys", []),
+                "api_key": engines_config.get("you_api_key", ""),
+            }
+        )
+    elif engine_name == "you_contents":
+        cfg.update(
+            {
+                "enabled": engines_config.get("you_contents_enabled", False),
+                "api_keys": engines_config.get("you_api_keys", []),
+                "api_key": engines_config.get("you_api_key", ""),
+                "format": engines_config.get("you_contents_format", "markdown"),
+                "force": engines_config.get("you_contents_force", False),
+            }
+        )
+    elif engine_name == "you_images":
+        cfg.update(
+            {
+                "enabled": engines_config.get("you_images_enabled", False),
+                "api_keys": engines_config.get("you_api_keys", []),
+                "api_key": engines_config.get("you_api_key", ""),
+            }
+        )
     return cfg
 
 class WebSearchTool(BaseTool):
@@ -106,6 +153,9 @@ class WebSearchTool(BaseTool):
     sogo: SogouEngine
     duckduckgo: DuckDuckGoEngine
     tavily: TavilyEngine
+    you: YouSearchEngine
+    you_news: YouLiveNewsEngine
+    you_contents: YouContentsClient
     model_config: Dict[str, Any]
     backend_config: Dict[str, Any]
     last_success_engine: Optional[str]
@@ -133,18 +183,28 @@ class WebSearchTool(BaseTool):
             "proxy": backend_config.get("proxy"),
             "max_results": backend_config.get("max_results", 10)
         }
+        contents_common_config = {
+            **common_config,
+            "timeout": backend_config.get("content_timeout", common_config["timeout"]),
+        }
 
         google_config = _build_engine_config("google", engines_config, common_config)
         bing_config = _build_engine_config("bing", engines_config, common_config)
         sogou_config = _build_engine_config("sogou", engines_config, common_config)
         duckduckgo_config = _build_engine_config("duckduckgo", engines_config, common_config)
         tavily_config = _build_engine_config("tavily", engines_config, common_config)
+        you_config = _build_engine_config("you", engines_config, common_config)
+        you_news_config = _build_engine_config("you_news", engines_config, common_config)
+        you_contents_config = _build_engine_config("you_contents", engines_config, contents_common_config)
 
         self.google = GoogleEngine(google_config)
         self.bing = BingEngine(bing_config)
         self.sogo = SogouEngine(sogou_config)
         self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
         self.tavily = TavilyEngine(tavily_config)
+        self.you = YouSearchEngine(you_config)
+        self.you_news = YouLiveNewsEngine(you_news_config)
+        self.you_contents = YouContentsClient(you_contents_config)
         self.last_success_engine = None
         self.last_tavily_answer: Optional[str] = None
         
@@ -572,6 +632,8 @@ class WebSearchTool(BaseTool):
         # 定义搜索引擎顺序
         all_engines = [
             ("tavily", self.tavily),
+            ("you", self.you),
+            ("you_news", self.you_news),
             ("google", self.google),
             ("bing", self.bing),
             ("duckduckgo", self.duckduckgo),
@@ -588,14 +650,15 @@ class WebSearchTool(BaseTool):
             # 检查引擎是否启用（平铺字段），缺省时依据默认：google/tavily 默认禁用，其余启用
             is_enabled = engines_config.get(f"{engine_name}_enabled")
             if is_enabled is None:
-                defaults = {"google": False, "tavily": False}
+                defaults = {"google": False, "tavily": False, "you": False, "you_news": False}
                 is_enabled = defaults.get(engine_name, True)
             if not is_enabled:
                 logger.info(f"搜索引擎 {engine_name} 已禁用，跳过")
                 continue
-            if engine_name == "tavily" and not (hasattr(self.tavily, "has_api_keys") and self.tavily.has_api_keys()):
-                logger.info("Tavily 搜索未配置 API key，跳过调用")
-                continue
+            if engine_name in {"tavily", "you", "you_news"} and hasattr(engine, "has_api_keys"):
+                if not engine.has_api_keys():
+                    logger.info(f"{engine_name} 搜索未配置 API key，跳过调用")
+                    continue
                 
             try:
                 # 调用基类中统一的、带重试的方法
@@ -729,6 +792,41 @@ class WebSearchTool(BaseTool):
         urls_to_fetch = [result.url for result in results if result.url]
         if not urls_to_fetch:
             return results
+        max_length = self.backend_config.get("max_content_length", 3000)
+
+        engines_config = self.plugin_config.get("engines", {})
+        use_you_contents = False
+        if engines_config.get("you_contents_enabled", False):
+            if self.you_contents.has_api_keys():
+                force_contents = engines_config.get("you_contents_force", False)
+                if force_contents or self.last_success_engine in {"you", "you_news"}:
+                    use_you_contents = True
+            else:
+                logger.info("You Contents 未配置 API key，跳过调用")
+
+        if use_you_contents:
+            contents_map = await self.you_contents.fetch_contents(urls_to_fetch)
+            if contents_map:
+                for result in results:
+                    url = result.url
+                    if not url:
+                        continue
+                    content = contents_map.get(url)
+                    if not content:
+                        continue
+                    if max_length and len(content) > max_length:
+                        content = content[:max_length]
+                    if result.abstract:
+                        if content not in result.abstract:
+                            result.abstract = f"{result.abstract}\n{content}"
+                    else:
+                        result.abstract = content
+                    if not result.content:
+                        result.content = content
+
+                urls_to_fetch = [url for url in urls_to_fetch if url not in contents_map]
+                if not urls_to_fetch:
+                    return results
 
         async with aiohttp.ClientSession(trust_env=True) as session:
             tasks = [self._fetch_page_content(session, url) for url in urls_to_fetch]
@@ -739,14 +837,14 @@ class WebSearchTool(BaseTool):
                 if result.url:
                     if content_idx < len(content_results):
                         content_or_exc = content_results[content_idx]
-                        
+
                         if isinstance(content_or_exc, str) and content_or_exc:
                             result.abstract = f"{result.abstract}\n{content_or_exc}"
                         elif isinstance(content_or_exc, Exception):
                             logger.warning(f"抓取 {result.url} 内容时发生异常: {content_or_exc}")
-                        
+
                         content_idx += 1
-        
+
         return results
 
     def _integrate_inline_content(self, results: List[SearchResult]) -> None:
@@ -837,6 +935,7 @@ class ImageSearchAction(BaseAction):
     sogou: SogouEngine
     duckduckgo: DuckDuckGoEngine
     backend_config: Dict[str, Any]
+    you_images: YouImagesEngine
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -860,6 +959,7 @@ class ImageSearchAction(BaseAction):
             "timeout": backend_config.get("timeout", 20),
             "proxy": backend_config.get("proxy")
         }
+        you_images_config = _build_engine_config("you_images", engines_config, common_config)
 
         # 初始化所有图片搜索引擎（Bing和搜狗国内可直接访问）
         bing_config = _build_engine_config("bing", engines_config, common_config)
@@ -869,6 +969,7 @@ class ImageSearchAction(BaseAction):
         self.bing = BingEngine(bing_config)
         self.sogou = SogouEngine(sogou_config)
         self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
+        self.you_images = YouImagesEngine(you_images_config)
 
         self.backend_config = config.get("search_backend", {})
         max_results = self.backend_config.get("max_results")
@@ -904,12 +1005,20 @@ class ImageSearchAction(BaseAction):
             # Bing和搜狗国内可直接访问，DuckDuckGo需要科学上网
             image_results = []
             engines = [
+                (self.you_images, "You Images"),
                 (self.bing, "Bing"),
                 (self.sogou, "搜狗"),
                 (self.duckduckgo, "DuckDuckGo")
             ]
 
             for engine, name in engines:
+                if name == "You Images":
+                    if not engines_config.get("you_images_enabled", False):
+                        logger.info("You Images 未启用，跳过调用")
+                        continue
+                    if not (hasattr(engine, "has_api_keys") and engine.has_api_keys()):
+                        logger.info("You Images 未配置 API key，跳过调用")
+                        continue
                 try:
                     logger.info(f"尝试使用{name}搜索图片: {query}")
                     image_results = await engine.search_images(query, num_results)
@@ -1055,8 +1164,8 @@ class google_search_simple(BasePlugin):
             "default_engine": ConfigField(
                 type=str,
                 default="bing",
-                description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily)",
-                choices=["google", "bing", "sogou", "duckduckgo", "tavily"],
+                description="默认搜索引擎 (google/bing/sogou/duckduckgo/tavily/you/you_news)",
+                choices=["google", "bing", "sogou", "duckduckgo", "tavily", "you", "you_news"],
             ),
             "max_results": ConfigField(type=int, default=15, description="默认返回结果数量"),
             "timeout": ConfigField(type=int, default=20, description="搜索超时时间（秒）"),
@@ -1099,6 +1208,45 @@ class google_search_simple(BasePlugin):
             "tavily_include_answer": ConfigField(type=bool, default=True, description="是否返回 Tavily 生成的答案"),
             "tavily_topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'"),
             "tavily_turbo": ConfigField(type=bool, default=False, description="是否启用 Tavily Turbo 模式"),
+            "you_enabled": ConfigField(type=bool, default=False, description="是否启用 You Search"),
+            "you_news_enabled": ConfigField(type=bool, default=False, description="是否启用 You Live News（early access）"),
+            "you_api_keys": ConfigField(type=list, default=[], description="You API key 列表，填写多个时随机选用"),
+            "you_api_key": ConfigField(type=str, default="", description="You API key；留空则使用环境变量 YOU_API_KEY"),
+            "you_freshness": ConfigField(type=str, default="", description="You 搜索时间范围，例如 day/week/month/year 或日期范围"),
+            "you_offset": ConfigField(type=int, default=0, description="You 搜索分页 offset（0-9）"),
+            "you_country": ConfigField(type=str, default="", description="You 搜索国家代码（如 CN/US）"),
+            "you_language": ConfigField(type=str, default="", description="You 搜索语言（BCP 47，如 EN/zh-Hans）"),
+            "you_safesearch": ConfigField(
+                type=str,
+                default="",
+                choices=["off", "moderate", "strict", ""],
+                description="You 安全搜索级别；留空表示使用默认值",
+            ),
+            "you_livecrawl": ConfigField(
+                type=str,
+                default="",
+                choices=["web", "news", "all", ""],
+                description="You Livecrawl 范围；留空表示不启用",
+            ),
+            "you_livecrawl_formats": ConfigField(
+                type=str,
+                default="",
+                choices=["html", "markdown", ""],
+                description="You Livecrawl 内容格式；留空表示不启用",
+            ),
+            "you_contents_enabled": ConfigField(type=bool, default=False, description="是否启用 You Contents 抓取"),
+            "you_contents_format": ConfigField(
+                type=str,
+                default="markdown",
+                choices=["html", "markdown"],
+                description="You Contents 返回内容格式",
+            ),
+            "you_contents_force": ConfigField(
+                type=bool,
+                default=False,
+                description="是否强制使用 You Contents（不受搜索引擎来源限制）",
+            ),
+            "you_images_enabled": ConfigField(type=bool, default=False, description="是否启用 You Images（early access）"),
         },
         "storage": {
             "enable_store": ConfigField(type=bool, default=True, description="是否将搜索结果写入 chat_history"),
