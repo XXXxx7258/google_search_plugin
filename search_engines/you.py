@@ -92,9 +92,15 @@ class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
             "count": request_count,
         }
 
+        offset = self.config.get("offset")
+        if isinstance(offset, int):
+            if offset < 0 or offset > 9:
+                logger.warning("You Search offset %s out of range (0-9); clamp.", offset)
+                offset = min(max(offset, 0), 9)
+            params["offset"] = offset
+
         for key in (
             "freshness",
-            "offset",
             "country",
             "language",
             "safesearch",
@@ -193,7 +199,7 @@ class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
                     )
                 )
 
-        return results[: min(len(results), num_results)]
+        return results[:request_count]
 
 
 class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
@@ -205,14 +211,14 @@ class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         self._init_api_keys(self.config)
+        if self.config.get("enabled"):
+            logger.info("You Live News is early access; ensure the API key has access.")
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
         api_key = self._pick_api_key()
         if not api_key:
             logger.warning("You Live News API key is not configured; skip live news.")
             return []
-
-        logger.warning("You Live News is early access; ensure the API key has access.")
 
         request_count = min(num_results if num_results > 0 else self.max_results, self.max_results)
         params = {
@@ -279,9 +285,9 @@ class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
                     rank=index,
                     content="",
                 )
-            )
+                )
 
-        return results[: min(len(results), num_results)]
+        return results[:request_count]
 
 
 class YouContentsClient(_YouApiKeyMixin):
@@ -393,6 +399,8 @@ class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
         self._init_api_keys(self.config)
+        if self.config.get("enabled"):
+            logger.info("You Images is early access; ensure the API key has access.")
 
     async def search_images(self, query: str, num_results: int) -> List[Dict[str, str]]:
         api_key = self._pick_api_key()
@@ -400,8 +408,7 @@ class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
             logger.warning("You Images API key is not configured; skip image search.")
             return []
 
-        logger.warning("You Images is early access; ensure the API key has access.")
-
+        request_count = min(num_results if num_results > 0 else self.max_results, self.max_results)
         params = {
             "q": query,
         }
@@ -448,7 +455,7 @@ class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
             return []
 
         results: List[Dict[str, str]] = []
-        for item in items[:num_results]:
+        for item in items[:request_count]:
             if not isinstance(item, dict):
                 continue
             image_url = item.get("image_url")
