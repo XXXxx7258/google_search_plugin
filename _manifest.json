@@ -7,19 +7,34 @@
     "name": "晴空",
     "url": "https://github.com/XXXxx7258"
   },
-  "license": "MIT",
+  "license": "AGPL",
 
   "host_application": {
     "min_version": "0.10.0"
   },
   "homepage_url": "https://github.com/XXXxx7258/google_search_plugin",
   "repository_url": "https://github.com/XXXxx7258/google_search_plugin",
-  "keywords": ["google", "search", "web", "internet", "图片", "查询", "搜索", "多引擎", "翻译", "缩写", "nbnhhsh"],
-  "categories": ["Search", "Utilities", "Translation" ,"image"],
-
+  "keywords": [
+    "google",
+    "search",
+    "web",
+    "internet",
+    "图片",
+    "查询",
+    "搜索",
+    "多引擎",
+    "翻译",
+    "缩写",
+    "nbnhhsh"
+  ],
+  "categories": [
+    "Search",
+    "Utilities",
+    "Translation",
+    "image"
+  ],
   "default_locale": "zh-CN",
   "locales_path": "_locales",
-
   "plugin_info": {
     "is_built_in": false,
     "plugin_type": "search",
@@ -48,6 +63,7 @@
   }
 
 }
+
 
 
 
