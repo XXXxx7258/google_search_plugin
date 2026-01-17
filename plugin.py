@@ -818,18 +818,22 @@ class WebSearchTool(BaseTool):
             tasks = [self._fetch_page_content(session, url) for url in urls_to_fetch]
             content_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            content_idx = 0
+            content_map = dict(zip(urls_to_fetch, content_results))
             for result in results:
-                if result.url:
-                    if content_idx < len(content_results):
-                        content_or_exc = content_results[content_idx]
+                url = result.url
+                if not url:
+                    continue
+                if url not in content_map:
+                    continue
+                content_or_exc = content_map[url]
 
-                        if isinstance(content_or_exc, str) and content_or_exc:
-                            result.abstract = f"{result.abstract}\n{content_or_exc}"
-                        elif isinstance(content_or_exc, Exception):
-                            logger.warning(f"抓取 {result.url} 内容时发生异常: {content_or_exc}")
-
-                        content_idx += 1
+                if isinstance(content_or_exc, str) and content_or_exc:
+                    if result.abstract:
+                        result.abstract = f"{result.abstract}\n{content_or_exc}"
+                    else:
+                        result.abstract = content_or_exc
+                elif isinstance(content_or_exc, Exception):
+                    logger.warning(f"抓取 {url} 内容时发生异常: {content_or_exc}")
 
         return results
 
@@ -1005,6 +1009,18 @@ class ImageSearchAction(BaseAction):
                         continue
                     if not engine.has_api_keys():
                         logger.info("You Images 未配置 API key，跳过调用")
+                        continue
+                elif name == "Bing":
+                    if not engines_config.get("bing_enabled", True):
+                        logger.info("Bing 图片搜索已禁用，跳过调用")
+                        continue
+                elif name == "搜狗":
+                    if not engines_config.get("sogou_enabled", True):
+                        logger.info("搜狗图片搜索已禁用，跳过调用")
+                        continue
+                elif name == "DuckDuckGo":
+                    if not engines_config.get("duckduckgo_enabled", True):
+                        logger.info("DuckDuckGo 图片搜索已禁用，跳过调用")
                         continue
                 try:
                     logger.info(f"尝试使用{name}搜索图片: {query}")
