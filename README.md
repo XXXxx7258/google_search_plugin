@@ -2,9 +2,11 @@
 
 这是一个搜索插件，还有缩写翻译，还有图片搜索
 
-## 已更新[tavily](https://app.tavily.com)搜索引擎，很好用:)
+## 已更新[tavily](https://app.tavily.com)以及[You](https://you.com/platform)搜索引擎，很好用:)
 
-## tavily搜索引擎可以前往[官网](https://app.tavily.com)注册后获得密钥,可以使用作者自建的免费注册临时[邮箱1](https://xiaowan258.me)或[邮箱2](https://mail.xiaowan.me)注册 
+## tavily搜索引擎可以前往[官网](https://app.tavily.com)注册后获得密钥
+## You搜索引擎需要在[官网](https://you.com/platform) 获取 API Key；Live News / Images 为 early access，需账号权限）
+## 以上二者均可以使用作者自建的免费注册临时[邮箱1](https://xiaowan258.me)或[邮箱2](https://mail.xiaowan.me)注册 
 
 <img width="735" height="308" alt="image" src="https://github.com/user-attachments/assets/9bc86124-b3a8-43e0-addb-1884133658c2" />
 
@@ -45,7 +47,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ### `[search_backend]`
 这里配置供模型调用的“后端”搜索引擎的行为。
 
-- `default_engine` (str, 下拉 choices): 默认使用的搜索引擎 (`google`, `bing`, `sogou`, `duckduckgo`, `tavily`)。
+- `default_engine` (str, 下拉 choices): 默认使用的搜索引擎 (`google`, `bing`, `sogou`, `duckduckgo`, `tavily`, `you`, `you_news`)。
 - `max_results` (int): 每次搜索返回给模型阅读的结果数量。
 - `timeout` (int): 后端搜索引擎的超时时间。
 - `proxy` (str): 用于后端搜索的HTTP/HTTPS代理地址，例如 'http://127.0.0.1:7890'。默认为空字符串，表示不使用代理。
@@ -73,6 +75,20 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 - `tavily_include_raw_content` (bool): 是否返回网页正文片段。
 - `tavily_topic` (str): 主题参数，如 `general` 或 `news`。
 - `tavily_turbo` (bool): Tavily Turbo 模式。
+- `you_enabled` (bool): 是否启用 You Search。
+- `you_news_enabled` (bool): 是否启用 You Live News（early access）。
+- `you_api_keys` (list[str]) / `you_api_key` (str): You API key 列表或单个（也可用环境变量 `YOU_API_KEY`）。
+- `you_freshness` (str): 时间范围（day/week/month/year 或日期范围）。
+- `you_offset` (int): 分页 offset（0-9）。
+- `you_country` (str): 国家代码（如 CN/US）。
+- `you_language` (str): 语言（BCP 47）。
+- `you_safesearch` (str): 安全级别（off/moderate/strict）。
+- `you_livecrawl` (str): livecrawl 范围（web/news/all）。
+- `you_livecrawl_formats` (str): livecrawl 内容格式（html/markdown）。
+- `you_contents_enabled` (bool): 是否启用 You Contents 抓取。
+- `you_contents_format` (str): Contents 返回内容格式（html/markdown）。
+- `you_contents_force` (bool): 强制使用 Contents，不受引擎来源限制。
+- `you_images_enabled` (bool): 是否启用 You Images（early access）。
 
 ## 使用说明
 
@@ -93,12 +109,16 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 ### 总结
 你只需要自然地与麦麦对话，当她认为需要“上网查一下”的时候，这个插件就会被激活
 
+
+---
+
 ## 鸣谢：
 [MaiBot](https://github.com/MaiM-with-u/MaiBot)
 
 感谢[heitiehu-beep](https://github.com/heitiehu-beep),[wanshangovo](https://github.com/wanshangovo)
 提供的代码优化以及改进
 ---
+
 
 
 
