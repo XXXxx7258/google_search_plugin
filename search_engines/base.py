@@ -26,6 +26,17 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 ]
 
+
+def mask_api_key(api_key: Optional[str]) -> str:
+    if not api_key:
+        return "<empty>"
+    value = str(api_key)
+    if len(value) <= 4:
+        return "*" * len(value)
+    if len(value) <= 8:
+        return f"{value[:2]}***{value[-2:]}"
+    return f"{value[:4]}***{value[-4:]}"
+
 @dataclass
 class SearchResult:
     title: str
