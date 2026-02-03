@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from .base import BaseSearchEngine, SearchResult
+from .base import BaseSearchEngine, SearchResult, mask_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,11 @@ class _YouApiKeyMixin:
             return None
         return random.choice(self.api_keys)
 
+    def _iter_api_keys(self) -> List[str]:
+        if not self.api_keys:
+            return []
+        return random.sample(self.api_keys, k=len(self.api_keys))
+
 
 def _first_snippet(value: Any) -> str:
     if isinstance(value, list):
@@ -81,8 +86,8 @@ class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
         self._init_api_keys(self.config)
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
-        api_key = self._pick_api_key()
-        if not api_key:
+        api_keys = self._iter_api_keys()
+        if not api_keys:
             logger.warning("You Search API key is not configured; skip You search.")
             return []
 
@@ -114,92 +119,111 @@ class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
                 continue
             params[key] = value
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
-            headers = {
-                "Accept": "application/json",
-                "X-API-Key": api_key,
-            }
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    f"{self.BASE_URL}{self.SEARCH_ENDPOINT}",
-                    params=params,
-                    headers=headers,
-                    proxy=self.proxy,
-                ) as response:
-                    response_text = await response.text()
-                    if response.status >= 400:
-                        logger.error(
-                            "You Search request failed with status %s; response body: %s",
-                            response.status,
-                            response_text,
+        timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
+
+        for api_key in api_keys:
+            try:
+                headers = {
+                    "Accept": "application/json",
+                    "X-API-Key": api_key,
+                }
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(
+                        f"{self.BASE_URL}{self.SEARCH_ENDPOINT}",
+                        params=params,
+                        headers=headers,
+                        proxy=self.proxy,
+                    ) as response:
+                        response_text = await response.text()
+                        if response.status >= 400:
+                            logger.error(
+                                "You Search request failed with status %s for key %s; response body: %s",
+                                response.status,
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+                        if not response_text:
+                            logger.error("You Search returned an empty response for key %s.", mask_api_key(api_key))
+                            continue
+                        try:
+                            data = await response.json()
+                        except Exception:
+                            logger.error(
+                                "Failed to parse You Search response as JSON for key %s: %s",
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+            except Exception as exc:
+                logger.error(
+                    "You Search raised an exception for key %s: %s",
+                    mask_api_key(api_key),
+                    exc,
+                    exc_info=True,
+                )
+                continue
+
+            if not isinstance(data, dict):
+                logger.error(
+                    "Unexpected You Search response type for key %s: %s",
+                    mask_api_key(api_key),
+                    type(data),
+                )
+                continue
+
+            results_data = data.get("results") or {}
+            web_items = results_data.get("web") if isinstance(results_data, dict) else None
+            news_items = results_data.get("news") if isinstance(results_data, dict) else None
+
+            results: List[SearchResult] = []
+
+            if isinstance(web_items, list):
+                for index, item in enumerate(web_items):
+                    if not isinstance(item, dict):
+                        continue
+                    title = self.tidy_text(item.get("title", ""))
+                    url = item.get("url", "")
+                    if not title or not self._is_valid_url(url):
+                        continue
+                    description = self.tidy_text(item.get("description", ""))
+                    snippet = self.tidy_text(_first_snippet(item.get("snippets"))) or description
+                    content = _pick_contents(item.get("contents"))
+                    results.append(
+                        SearchResult(
+                            title=title,
+                            url=url,
+                            snippet=snippet,
+                            abstract=snippet or description,
+                            rank=index,
+                            content=content,
                         )
-                        return []
-                    if not response_text:
-                        logger.error("You Search returned an empty response.")
-                        return []
-                    try:
-                        data = await response.json()
-                    except Exception:
-                        logger.error("Failed to parse You Search response as JSON: %s", response_text)
-                        return []
-        except Exception as exc:
-            logger.error("You Search raised an exception: %s", exc, exc_info=True)
-            return []
-
-        if not isinstance(data, dict):
-            return []
-
-        results_data = data.get("results") or {}
-        web_items = results_data.get("web") if isinstance(results_data, dict) else None
-        news_items = results_data.get("news") if isinstance(results_data, dict) else None
-
-        results: List[SearchResult] = []
-
-        if isinstance(web_items, list):
-            for index, item in enumerate(web_items):
-                if not isinstance(item, dict):
-                    continue
-                title = self.tidy_text(item.get("title", ""))
-                url = item.get("url", "")
-                if not title or not self._is_valid_url(url):
-                    continue
-                description = self.tidy_text(item.get("description", ""))
-                snippet = self.tidy_text(_first_snippet(item.get("snippets"))) or description
-                content = _pick_contents(item.get("contents"))
-                results.append(
-                    SearchResult(
-                        title=title,
-                        url=url,
-                        snippet=snippet,
-                        abstract=snippet or description,
-                        rank=index,
-                        content=content,
                     )
-                )
 
-        if isinstance(news_items, list):
-            offset = len(results)
-            for index, item in enumerate(news_items):
-                if not isinstance(item, dict):
-                    continue
-                title = self.tidy_text(item.get("title", ""))
-                url = item.get("url", "")
-                if not title or not self._is_valid_url(url):
-                    continue
-                description = self.tidy_text(item.get("description", ""))
-                results.append(
-                    SearchResult(
-                        title=title,
-                        url=url,
-                        snippet=description,
-                        abstract=description,
-                        rank=offset + index,
-                        content="",
+            if isinstance(news_items, list):
+                offset = len(results)
+                for index, item in enumerate(news_items):
+                    if not isinstance(item, dict):
+                        continue
+                    title = self.tidy_text(item.get("title", ""))
+                    url = item.get("url", "")
+                    if not title or not self._is_valid_url(url):
+                        continue
+                    description = self.tidy_text(item.get("description", ""))
+                    results.append(
+                        SearchResult(
+                            title=title,
+                            url=url,
+                            snippet=description,
+                            abstract=description,
+                            rank=offset + index,
+                            content="",
+                        )
                     )
-                )
 
-        return results[:request_count]
+            return results[:request_count]
+
+        return []
 
 
 class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
@@ -215,8 +239,8 @@ class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
             logger.info("You Live News is early access; ensure the API key has access.")
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
-        api_key = self._pick_api_key()
-        if not api_key:
+        api_keys = self._iter_api_keys()
+        if not api_keys:
             logger.warning("You Live News API key is not configured; skip live news.")
             return []
 
@@ -226,68 +250,95 @@ class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
             "count": request_count,
         }
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
-            headers = {
-                "Accept": "application/json",
-                "X-API-Key": api_key,
-            }
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    f"{self.BASE_URL}{self.NEWS_ENDPOINT}",
-                    params=params,
-                    headers=headers,
-                    proxy=self.proxy,
-                ) as response:
-                    response_text = await response.text()
-                    if response.status >= 400:
-                        logger.error(
-                            "You Live News request failed with status %s; response body: %s",
-                            response.status,
-                            response_text,
-                        )
-                        return []
-                    if not response_text:
-                        logger.error("You Live News returned an empty response.")
-                        return []
-                    try:
-                        data = await response.json()
-                    except Exception:
-                        logger.error("Failed to parse You Live News response as JSON: %s", response_text)
-                        return []
-        except Exception as exc:
-            logger.error("You Live News raised an exception: %s", exc, exc_info=True)
-            return []
+        timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
 
-        if not isinstance(data, dict):
-            return []
-
-        news_data = data.get("news") or {}
-        items = news_data.get("results") if isinstance(news_data, dict) else None
-        if not isinstance(items, list):
-            return []
-
-        results: List[SearchResult] = []
-        for index, item in enumerate(items):
-            if not isinstance(item, dict):
-                continue
-            title = self.tidy_text(item.get("title", ""))
-            url = item.get("url", "")
-            if not title or not self._is_valid_url(url):
-                continue
-            description = self.tidy_text(item.get("description", ""))
-            results.append(
-                SearchResult(
-                    title=title,
-                    url=url,
-                    snippet=description,
-                    abstract=description,
-                    rank=index,
-                    content="",
+        for api_key in api_keys:
+            try:
+                headers = {
+                    "Accept": "application/json",
+                    "X-API-Key": api_key,
+                }
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(
+                        f"{self.BASE_URL}{self.NEWS_ENDPOINT}",
+                        params=params,
+                        headers=headers,
+                        proxy=self.proxy,
+                    ) as response:
+                        response_text = await response.text()
+                        if response.status >= 400:
+                            logger.error(
+                                "You Live News request failed with status %s for key %s; response body: %s",
+                                response.status,
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+                        if not response_text:
+                            logger.error(
+                                "You Live News returned an empty response for key %s.",
+                                mask_api_key(api_key),
+                            )
+                            continue
+                        try:
+                            data = await response.json()
+                        except Exception:
+                            logger.error(
+                                "Failed to parse You Live News response as JSON for key %s: %s",
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+            except Exception as exc:
+                logger.error(
+                    "You Live News raised an exception for key %s: %s",
+                    mask_api_key(api_key),
+                    exc,
+                    exc_info=True,
                 )
+                continue
+
+            if not isinstance(data, dict):
+                logger.error(
+                    "Unexpected You Live News response type for key %s: %s",
+                    mask_api_key(api_key),
+                    type(data),
+                )
+                continue
+
+            news_data = data.get("news") or {}
+            items = news_data.get("results") if isinstance(news_data, dict) else None
+            if not isinstance(items, list):
+                logger.error(
+                    "Unexpected You Live News results for key %s: %s",
+                    mask_api_key(api_key),
+                    type(items),
+                )
+                continue
+
+            results: List[SearchResult] = []
+            for index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                title = self.tidy_text(item.get("title", ""))
+                url = item.get("url", "")
+                if not title or not self._is_valid_url(url):
+                    continue
+                description = self.tidy_text(item.get("description", ""))
+                results.append(
+                    SearchResult(
+                        title=title,
+                        url=url,
+                        snippet=description,
+                        abstract=description,
+                        rank=index,
+                        content="",
+                    )
                 )
 
-        return results[:request_count]
+            return results[:request_count]
+
+        return []
 
 
 class YouContentsClient(_YouApiKeyMixin):
@@ -306,8 +357,8 @@ class YouContentsClient(_YouApiKeyMixin):
         self._init_api_keys(self.config)
 
     async def fetch_contents(self, urls: List[str]) -> Dict[str, str]:
-        api_key = self._pick_api_key()
-        if not api_key:
+        api_keys = self._iter_api_keys()
+        if not api_keys:
             logger.warning("You Contents API key is not configured; skip contents fetch.")
             return {}
 
@@ -322,7 +373,9 @@ class YouContentsClient(_YouApiKeyMixin):
             batch = [url for url in urls[start:start + batch_size] if url]
             if not batch:
                 continue
-            batch_map = await self._fetch_contents_batch(batch, format_value, api_key)
+            batch_map = await self._fetch_contents_batch(batch, format_value, api_keys)
+            if batch_map is None:
+                continue
             if batch_map:
                 contents_map.update(batch_map)
 
@@ -332,62 +385,83 @@ class YouContentsClient(_YouApiKeyMixin):
         self,
         urls: List[str],
         format_value: str,
-        api_key: str,
-    ) -> Dict[str, str]:
+        api_keys: List[str],
+    ) -> Optional[Dict[str, str]]:
         payload = {"urls": urls, "format": format_value}
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
-            headers = {
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "X-API-Key": api_key,
-            }
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    f"{self.BASE_URL}{self.CONTENTS_ENDPOINT}",
-                    json=payload,
-                    headers=headers,
-                    proxy=self.proxy,
-                ) as response:
-                    response_text = await response.text()
-                    if response.status >= 400:
-                        logger.error(
-                            "You Contents request failed with status %s; response body: %s",
-                            response.status,
-                            response_text,
-                        )
-                        return {}
-                    if not response_text:
-                        logger.error("You Contents returned an empty response.")
-                        return {}
-                    try:
-                        data = await response.json()
-                    except Exception:
-                        logger.error("Failed to parse You Contents response as JSON: %s", response_text)
-                        return {}
-        except Exception as exc:
-            logger.error("You Contents raised an exception: %s", exc, exc_info=True)
-            return {}
+        timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
 
-        if not isinstance(data, list):
-            logger.error("Unexpected You Contents response type: %s", type(data))
-            return {}
-
-        contents_map: Dict[str, str] = {}
-        for item in data:
-            if not isinstance(item, dict):
+        for api_key in api_keys:
+            try:
+                headers = {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-API-Key": api_key,
+                }
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        f"{self.BASE_URL}{self.CONTENTS_ENDPOINT}",
+                        json=payload,
+                        headers=headers,
+                        proxy=self.proxy,
+                    ) as response:
+                        response_text = await response.text()
+                        if response.status >= 400:
+                            logger.error(
+                                "You Contents request failed with status %s for key %s; response body: %s",
+                                response.status,
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+                        if not response_text:
+                            logger.error(
+                                "You Contents returned an empty response for key %s.",
+                                mask_api_key(api_key),
+                            )
+                            continue
+                        try:
+                            data = await response.json()
+                        except Exception:
+                            logger.error(
+                                "Failed to parse You Contents response as JSON for key %s: %s",
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+            except Exception as exc:
+                logger.error(
+                    "You Contents raised an exception for key %s: %s",
+                    mask_api_key(api_key),
+                    exc,
+                    exc_info=True,
+                )
                 continue
-            url = item.get("url")
-            if not isinstance(url, str) or not url:
-                continue
-            content = item.get(format_value)
-            if not isinstance(content, str) or not content:
-                content = _pick_contents(item)
-            if content:
-                contents_map[url] = content
 
-        return contents_map
+            if not isinstance(data, list):
+                logger.error(
+                    "Unexpected You Contents response type for key %s: %s",
+                    mask_api_key(api_key),
+                    type(data),
+                )
+                continue
+
+            contents_map: Dict[str, str] = {}
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("url")
+                if not isinstance(url, str) or not url:
+                    continue
+                content = item.get(format_value)
+                if not isinstance(content, str) or not content:
+                    content = _pick_contents(item)
+                if content:
+                    contents_map[url] = content
+
+            return contents_map
+
+        return None
 
 
 class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
@@ -403,8 +477,8 @@ class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
             logger.info("You Images is early access; ensure the API key has access.")
 
     async def search_images(self, query: str, num_results: int) -> List[Dict[str, str]]:
-        api_key = self._pick_api_key()
-        if not api_key:
+        api_keys = self._iter_api_keys()
+        if not api_keys:
             logger.warning("You Images API key is not configured; skip image search.")
             return []
 
@@ -413,64 +487,88 @@ class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
             "q": query,
         }
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
-            headers = {
-                "Accept": "application/json",
-                "X-API-Key": api_key,
-            }
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    f"{self.BASE_URL}{self.IMAGES_ENDPOINT}",
-                    params=params,
-                    headers=headers,
-                    proxy=self.proxy,
-                ) as response:
-                    response_text = await response.text()
-                    if response.status >= 400:
-                        logger.error(
-                            "You Images request failed with status %s; response body: %s",
-                            response.status,
-                            response_text,
-                        )
-                        return []
-                    if not response_text:
-                        logger.error("You Images returned an empty response.")
-                        return []
-                    try:
-                        data = await response.json()
-                    except Exception:
-                        logger.error("Failed to parse You Images response as JSON: %s", response_text)
-                        return []
-        except Exception as exc:
-            logger.error("You Images raised an exception: %s", exc, exc_info=True)
-            return []
+        timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
 
-        if not isinstance(data, dict):
-            return []
-
-        images_data = data.get("images") or {}
-        items = images_data.get("results") if isinstance(images_data, dict) else None
-        if not isinstance(items, list):
-            return []
-
-        results: List[Dict[str, str]] = []
-        for item in items[:request_count]:
-            if not isinstance(item, dict):
-                continue
-            image_url = item.get("image_url")
-            if not isinstance(image_url, str) or not image_url:
-                continue
-            title = item.get("title") if isinstance(item.get("title"), str) else query
-            page_url = item.get("page_url")
-            if isinstance(page_url, str) and page_url:
-                title = f"{title} ({page_url})" if title else page_url
-            results.append(
-                {
-                    "image": image_url,
-                    "title": title or query,
-                    "thumbnail": image_url,
+        for api_key in api_keys:
+            try:
+                headers = {
+                    "Accept": "application/json",
+                    "X-API-Key": api_key,
                 }
-            )
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(
+                        f"{self.BASE_URL}{self.IMAGES_ENDPOINT}",
+                        params=params,
+                        headers=headers,
+                        proxy=self.proxy,
+                    ) as response:
+                        response_text = await response.text()
+                        if response.status >= 400:
+                            logger.error(
+                                "You Images request failed with status %s for key %s; response body: %s",
+                                response.status,
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+                        if not response_text:
+                            logger.error("You Images returned an empty response for key %s.", mask_api_key(api_key))
+                            continue
+                        try:
+                            data = await response.json()
+                        except Exception:
+                            logger.error(
+                                "Failed to parse You Images response as JSON for key %s: %s",
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
+            except Exception as exc:
+                logger.error(
+                    "You Images raised an exception for key %s: %s",
+                    mask_api_key(api_key),
+                    exc,
+                    exc_info=True,
+                )
+                continue
 
-        return results
+            if not isinstance(data, dict):
+                logger.error(
+                    "Unexpected You Images response type for key %s: %s",
+                    mask_api_key(api_key),
+                    type(data),
+                )
+                continue
+
+            images_data = data.get("images") or {}
+            items = images_data.get("results") if isinstance(images_data, dict) else None
+            if not isinstance(items, list):
+                logger.error(
+                    "Unexpected You Images results for key %s: %s",
+                    mask_api_key(api_key),
+                    type(items),
+                )
+                continue
+
+            results: List[Dict[str, str]] = []
+            for item in items[:request_count]:
+                if not isinstance(item, dict):
+                    continue
+                image_url = item.get("image_url")
+                if not isinstance(image_url, str) or not image_url:
+                    continue
+                title = item.get("title") if isinstance(item.get("title"), str) else query
+                page_url = item.get("page_url")
+                if isinstance(page_url, str) and page_url:
+                    title = f"{title} ({page_url})" if title else page_url
+                results.append(
+                    {
+                        "image": image_url,
+                        "title": title or query,
+                        "thumbnail": image_url,
+                    }
+                )
+
+            return results
+
+        return []
