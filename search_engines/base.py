@@ -1,8 +1,9 @@
-import random
-import warnings
-import logging
-import re
 import base64
+import logging
+import os
+import random
+import re
+import warnings
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 import aiohttp
 from dataclasses import dataclass
@@ -25,6 +26,60 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 ]
+
+def _collect_api_key_values(value: Optional[Any]) -> List[str]:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return [cleaned] if cleaned else []
+    if isinstance(value, (list, tuple, set)):
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return []
+
+
+def load_api_keys(config: Dict[str, Any], env_var: str) -> List[str]:
+    candidates: List[str] = (
+        _collect_api_key_values(config.get("api_keys"))
+        + _collect_api_key_values(config.get("api_key"))
+        + _collect_api_key_values(os.environ.get(env_var))
+    )
+    seen = set()
+    unique_keys: List[str] = []
+    for key in candidates:
+        if key and key not in seen:
+            seen.add(key)
+            unique_keys.append(key)
+    return unique_keys
+
+
+class ApiKeyMixin:
+    api_keys: List[str]
+
+    def _init_api_keys(self, config: Dict[str, Any], env_var: str) -> None:
+        self.api_keys = load_api_keys(config, env_var)
+
+    def has_api_keys(self) -> bool:
+        return bool(self.api_keys)
+
+    def _pick_api_key(self) -> Optional[str]:
+        if not self.api_keys:
+            return None
+        return random.choice(self.api_keys)
+
+    def _iter_api_keys(self) -> List[str]:
+        if not self.api_keys:
+            return []
+        return random.sample(self.api_keys, k=len(self.api_keys))
+
+
+def mask_api_key(api_key: Optional[str]) -> str:
+    if not api_key:
+        return "<empty>"
+    value = str(api_key)
+    if len(value) <= 4:
+        return "*" * len(value)
+    if len(value) <= 8:
+        return f"{value[:2]}***{value[-2:]}"
+    return f"{value[:4]}***{value[-4:]}"
 
 @dataclass
 class SearchResult:
