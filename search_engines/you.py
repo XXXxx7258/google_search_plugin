@@ -1,57 +1,11 @@
 import logging
-import os
-import random
 from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from .base import BaseSearchEngine, SearchResult, mask_api_key
+from .base import ApiKeyMixin, BaseSearchEngine, SearchResult, mask_api_key
 
 logger = logging.getLogger(__name__)
-
-
-def _collect_api_keys(value: Optional[Any]) -> List[str]:
-    if isinstance(value, str):
-        cleaned = value.strip()
-        return [cleaned] if cleaned else []
-    if isinstance(value, (list, tuple, set)):
-        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
-    return []
-
-
-def _load_you_api_keys(config: Dict[str, Any]) -> List[str]:
-    candidates: List[str] = (
-        _collect_api_keys(config.get("api_keys"))
-        + _collect_api_keys(config.get("api_key"))
-        + _collect_api_keys(os.environ.get("YOU_API_KEY"))
-    )
-    seen = set()
-    unique_keys: List[str] = []
-    for key in candidates:
-        if key and key not in seen:
-            seen.add(key)
-            unique_keys.append(key)
-    return unique_keys
-
-
-class _YouApiKeyMixin:
-    api_keys: List[str]
-
-    def _init_api_keys(self, config: Dict[str, Any]) -> None:
-        self.api_keys = _load_you_api_keys(config)
-
-    def has_api_keys(self) -> bool:
-        return bool(self.api_keys)
-
-    def _pick_api_key(self) -> Optional[str]:
-        if not self.api_keys:
-            return None
-        return random.choice(self.api_keys)
-
-    def _iter_api_keys(self) -> List[str]:
-        if not self.api_keys:
-            return []
-        return random.sample(self.api_keys, k=len(self.api_keys))
 
 
 def _first_snippet(value: Any) -> str:
@@ -75,7 +29,7 @@ def _pick_contents(value: Any) -> str:
     return ""
 
 
-class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
+class YouSearchEngine(BaseSearchEngine, ApiKeyMixin):
     """You.com search API client."""
 
     BASE_URL = "https://ydc-index.io"
@@ -83,7 +37,7 @@ class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self._init_api_keys(self.config)
+        self._init_api_keys(self.config, "YOU_API_KEY")
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
         api_keys = self._iter_api_keys()
@@ -226,7 +180,7 @@ class YouSearchEngine(BaseSearchEngine, _YouApiKeyMixin):
         return []
 
 
-class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
+class YouLiveNewsEngine(BaseSearchEngine, ApiKeyMixin):
     """You.com live news API client (early access)."""
 
     BASE_URL = "https://api.ydc-index.io"
@@ -234,7 +188,7 @@ class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self._init_api_keys(self.config)
+        self._init_api_keys(self.config, "YOU_API_KEY")
         if self.config.get("enabled"):
             logger.info("You Live News is early access; ensure the API key has access.")
 
@@ -341,7 +295,7 @@ class YouLiveNewsEngine(BaseSearchEngine, _YouApiKeyMixin):
         return []
 
 
-class YouContentsClient(_YouApiKeyMixin):
+class YouContentsClient(ApiKeyMixin):
     """You.com contents API client."""
 
     MAX_URLS_PER_REQUEST = 10
@@ -354,7 +308,7 @@ class YouContentsClient(_YouApiKeyMixin):
         self.proxy = self.config.get("proxy")
         self.format = self.config.get("format", "markdown")
         self.force = bool(self.config.get("force", False))
-        self._init_api_keys(self.config)
+        self._init_api_keys(self.config, "YOU_API_KEY")
 
     async def fetch_contents(self, urls: List[str]) -> Dict[str, str]:
         api_keys = self._iter_api_keys()
@@ -464,7 +418,7 @@ class YouContentsClient(_YouApiKeyMixin):
         return None
 
 
-class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
+class YouImagesEngine(BaseSearchEngine, ApiKeyMixin):
     """You.com images API client (early access)."""
 
     BASE_URL = "https://image-search.ydc-index.io"
@@ -472,7 +426,7 @@ class YouImagesEngine(BaseSearchEngine, _YouApiKeyMixin):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self._init_api_keys(self.config)
+        self._init_api_keys(self.config, "YOU_API_KEY")
         if self.config.get("enabled"):
             logger.info("You Images is early access; ensure the API key has access.")
 
