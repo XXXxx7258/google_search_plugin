@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from .base import BaseSearchEngine, SearchResult
+from .base import BaseSearchEngine, SearchResult, mask_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,8 @@ class TavilyEngine(BaseSearchEngine):
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
         """Execute a search request via the Tavily API."""
-        api_key = self._pick_api_key()
-        if not api_key:
+        api_keys = self._iter_api_keys()
+        if not api_keys:
             logger.warning("Tavily API key is not configured; skip Tavily search.")
             return []
 
@@ -49,7 +49,6 @@ class TavilyEngine(BaseSearchEngine):
         request_max_results = min(num_results if num_results > 0 else self.max_results, self.max_results)
 
         payload: Dict[str, Any] = {
-            "api_key": api_key,
             "query": query,
             "search_depth": self.search_depth,
             "max_results": request_max_results,
@@ -68,76 +67,93 @@ class TavilyEngine(BaseSearchEngine):
 
         payload = {key: value for key, value in payload.items() if _include_value(value)}
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            }
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    f"{self.BASE_URL}{self.SEARCH_ENDPOINT}",
-                    json=payload,
-                    headers=headers,
-                    proxy=self.proxy,
-                ) as response:
-                    response_text = await response.text()
-                    if response.status >= 400:
-                        logger.error(
-                            "Tavily search request failed with status %s; response body: %s",
-                            response.status,
-                            response_text,
-                        )
-                        return []
+        timeout = aiohttp.ClientTimeout(total=self.TIMEOUT)
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
 
-                    if not response_text:
-                        logger.error("Tavily returned an empty response.")
-                        return []
+        for api_key in api_keys:
+            payload_with_key = dict(payload)
+            payload_with_key["api_key"] = api_key
 
-                    try:
-                        data = json.loads(response_text)
-                    except json.JSONDecodeError:
-                        logger.error("Failed to parse Tavily response as JSON: %s", response_text)
-                        return []
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        f"{self.BASE_URL}{self.SEARCH_ENDPOINT}",
+                        json=payload_with_key,
+                        headers=headers,
+                        proxy=self.proxy,
+                    ) as response:
+                        response_text = await response.text()
+                        if response.status >= 400:
+                            logger.error(
+                                "Tavily search request failed with status %s for key %s; response body: %s",
+                                response.status,
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
 
-        except Exception as exc:
-            logger.error("Tavily search raised an exception: %s", exc, exc_info=True)
-            return []
+                        if not response_text:
+                            logger.error("Tavily returned an empty response for key %s.", mask_api_key(api_key))
+                            continue
 
-        if isinstance(data, dict):
-            answer = data.get("answer")
-            self.last_answer = answer.strip() if isinstance(answer, str) else None
-        else:
-            self.last_answer = None
+                        try:
+                            data = json.loads(response_text)
+                        except json.JSONDecodeError:
+                            logger.error(
+                                "Failed to parse Tavily response as JSON for key %s: %s",
+                                mask_api_key(api_key),
+                                response_text,
+                            )
+                            continue
 
-        results_data = data.get("results", []) if isinstance(data, dict) else []
-        results: List[SearchResult] = []
-
-        for index, item in enumerate(results_data):
-            if not isinstance(item, dict):
-                continue
-
-            title = self.tidy_text(item.get("title", ""))
-            url = item.get("url", "")
-            if not title or not self._is_valid_url(url):
-                continue
-
-            snippet_source = item.get("content") or item.get("snippet") or item.get("raw_content") or ""
-            snippet = self.tidy_text(snippet_source)
-            content = item.get("raw_content") or snippet
-
-            results.append(
-                SearchResult(
-                    title=title,
-                    url=url,
-                    snippet=snippet,
-                    abstract=snippet,
-                    rank=index,
-                    content=content,
+            except Exception as exc:
+                logger.error(
+                    "Tavily search raised an exception for key %s: %s",
+                    mask_api_key(api_key),
+                    exc,
+                    exc_info=True,
                 )
-            )
+                continue
 
-        return results[: min(len(results), num_results)]
+            if isinstance(data, dict):
+                answer = data.get("answer")
+                self.last_answer = answer.strip() if isinstance(answer, str) else None
+            else:
+                self.last_answer = None
+
+            results_data = data.get("results", []) if isinstance(data, dict) else []
+            results: List[SearchResult] = []
+
+            for index, item in enumerate(results_data):
+                if not isinstance(item, dict):
+                    continue
+
+                title = self.tidy_text(item.get("title", ""))
+                url = item.get("url", "")
+                if not title or not self._is_valid_url(url):
+                    continue
+
+                snippet_source = item.get("content") or item.get("snippet") or item.get("raw_content") or ""
+                snippet = self.tidy_text(snippet_source)
+                content = item.get("raw_content") or snippet
+
+                results.append(
+                    SearchResult(
+                        title=title,
+                        url=url,
+                        snippet=snippet,
+                        abstract=snippet,
+                        rank=index,
+                        content=content,
+                    )
+                )
+
+            return results[: min(len(results), num_results)]
+
+        return []
 
     def has_api_keys(self) -> bool:
         """Return True when at least one Tavily API key is available."""
@@ -173,3 +189,9 @@ class TavilyEngine(BaseSearchEngine):
         if not self.api_keys:
             return None
         return random.choice(self.api_keys)
+
+    def _iter_api_keys(self) -> List[str]:
+        """Return API keys in random order for retries."""
+        if not self.api_keys:
+            return []
+        return random.sample(self.api_keys, k=len(self.api_keys))
