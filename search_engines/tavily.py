@@ -1,17 +1,15 @@
 import json
 import logging
-import os
-import random
 from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from .base import BaseSearchEngine, SearchResult, mask_api_key
+from .base import ApiKeyMixin, BaseSearchEngine, SearchResult, mask_api_key
 
 logger = logging.getLogger(__name__)
 
 
-class TavilyEngine(BaseSearchEngine):
+class TavilyEngine(BaseSearchEngine, ApiKeyMixin):
     """Implementation of the Tavily search engine client."""
 
     BASE_URL = "https://api.tavily.com"
@@ -25,7 +23,7 @@ class TavilyEngine(BaseSearchEngine):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
-        self.api_keys = self._load_api_keys()
+        self._init_api_keys(self.config, "TAVILY_API_KEY")
         self.search_depth = self.config.get("search_depth", "basic")
         self.include_raw_content = self.config.get("include_raw_content", True)
         self.include_answer = self.config.get("include_answer", True)
@@ -158,40 +156,3 @@ class TavilyEngine(BaseSearchEngine):
     def has_api_keys(self) -> bool:
         """Return True when at least one Tavily API key is available."""
         return bool(self.api_keys)
-
-    def _load_api_keys(self) -> List[str]:
-        """Collect the list of Tavily API keys from config and environment."""
-        def _collect(value: Optional[Any]) -> List[str]:
-            if isinstance(value, str):
-                cleaned = value.strip()
-                return [cleaned] if cleaned else []
-            if isinstance(value, (list, tuple, set)):
-                return [item.strip() for item in value if isinstance(item, str) and item.strip()]
-            return []
-
-        candidates: List[str] = (
-            _collect(self.config.get("api_keys"))
-            + _collect(self.config.get("api_key"))
-            + _collect(os.environ.get("TAVILY_API_KEY"))
-        )
-
-        seen = set()
-        unique_keys: List[str] = []
-        for key in candidates:
-            if key and key not in seen:
-                seen.add(key)
-                unique_keys.append(key)
-
-        return unique_keys
-
-    def _pick_api_key(self) -> Optional[str]:
-        """Randomly select one Tavily API key to use for the request."""
-        if not self.api_keys:
-            return None
-        return random.choice(self.api_keys)
-
-    def _iter_api_keys(self) -> List[str]:
-        """Return API keys in random order for retries."""
-        if not self.api_keys:
-            return []
-        return random.sample(self.api_keys, k=len(self.api_keys))
