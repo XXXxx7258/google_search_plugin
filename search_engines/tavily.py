@@ -73,12 +73,12 @@ class TavilyEngine(BaseSearchEngine):
             "Accept": "application/json",
         }
 
-        for api_key in api_keys:
-            payload_with_key = dict(payload)
-            payload_with_key["api_key"] = api_key
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for api_key in api_keys:
+                payload_with_key = dict(payload)
+                payload_with_key["api_key"] = api_key
 
-            try:
-                async with aiohttp.ClientSession(timeout=timeout) as session:
+                try:
                     async with session.post(
                         f"{self.BASE_URL}{self.SEARCH_ENDPOINT}",
                         json=payload_with_key,
@@ -109,49 +109,49 @@ class TavilyEngine(BaseSearchEngine):
                             )
                             continue
 
-            except Exception as exc:
-                logger.error(
-                    "Tavily search raised an exception for key %s: %s",
-                    mask_api_key(api_key),
-                    exc,
-                    exc_info=True,
-                )
-                continue
-
-            if isinstance(data, dict):
-                answer = data.get("answer")
-                self.last_answer = answer.strip() if isinstance(answer, str) else None
-            else:
-                self.last_answer = None
-
-            results_data = data.get("results", []) if isinstance(data, dict) else []
-            results: List[SearchResult] = []
-
-            for index, item in enumerate(results_data):
-                if not isinstance(item, dict):
-                    continue
-
-                title = self.tidy_text(item.get("title", ""))
-                url = item.get("url", "")
-                if not title or not self._is_valid_url(url):
-                    continue
-
-                snippet_source = item.get("content") or item.get("snippet") or item.get("raw_content") or ""
-                snippet = self.tidy_text(snippet_source)
-                content = item.get("raw_content") or snippet
-
-                results.append(
-                    SearchResult(
-                        title=title,
-                        url=url,
-                        snippet=snippet,
-                        abstract=snippet,
-                        rank=index,
-                        content=content,
+                except Exception as exc:
+                    logger.error(
+                        "Tavily search raised an exception for key %s: %s",
+                        mask_api_key(api_key),
+                        exc,
+                        exc_info=True,
                     )
-                )
+                    continue
 
-            return results[: min(len(results), num_results)]
+                if isinstance(data, dict):
+                    answer = data.get("answer")
+                    self.last_answer = answer.strip() if isinstance(answer, str) else None
+                else:
+                    self.last_answer = None
+
+                results_data = data.get("results", []) if isinstance(data, dict) else []
+                results: List[SearchResult] = []
+
+                for index, item in enumerate(results_data):
+                    if not isinstance(item, dict):
+                        continue
+
+                    title = self.tidy_text(item.get("title", ""))
+                    url = item.get("url", "")
+                    if not title or not self._is_valid_url(url):
+                        continue
+
+                    snippet_source = item.get("content") or item.get("snippet") or item.get("raw_content") or ""
+                    snippet = self.tidy_text(snippet_source)
+                    content = item.get("raw_content") or snippet
+
+                    results.append(
+                        SearchResult(
+                            title=title,
+                            url=url,
+                            snippet=snippet,
+                            abstract=snippet,
+                            rank=index,
+                            content=content,
+                        )
+                    )
+
+                return results[: min(len(results), num_results)]
 
         return []
 
