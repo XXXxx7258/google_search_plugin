@@ -3,7 +3,8 @@ import re
 from typing import Optional, Tuple
 
 
-_ALLOWED_TAVILY_TOPICS = {"general", "news"}
+ALLOWED_TAVILY_TOPICS = frozenset({"general", "news"})
+_DECODER = json.JSONDecoder()
 
 
 def _strip_code_fence(text: str) -> str:
@@ -14,20 +15,30 @@ def _strip_code_fence(text: str) -> str:
     return match.group(1).strip() if match else text
 
 
-def _extract_first_json_object(text: str) -> Optional[str]:
-    start = text.find("{")
-    if start < 0:
+def _try_parse_rewrite_payload(text: str) -> Optional[dict]:
+    if not text:
         return None
-    depth = 0
-    for index in range(start, len(text)):
-        ch = text[index]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : index + 1].strip()
-    return None
+
+    start = 0
+    while True:
+        index = text.find("{", start)
+        if index < 0:
+            return None
+
+        try:
+            obj, _ = _DECODER.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            start = index + 1
+            continue
+
+        if not isinstance(obj, dict):
+            start = index + 1
+            continue
+
+        if any(key in obj for key in ("query", "tavily_topic", "topic")):
+            return obj
+
+        start = index + 1
 
 
 def parse_rewrite_output(raw: str) -> Tuple[str, Optional[str]]:
@@ -45,26 +56,20 @@ def parse_rewrite_output(raw: str) -> Tuple[str, Optional[str]]:
         return "", None
 
     text = _strip_code_fence(raw_str)
-    json_text = _extract_first_json_object(text) if "{" in text else None
-    if json_text:
-        try:
-            data = json.loads(json_text)
-        except json.JSONDecodeError:
-            return raw_str, None
+    data = _try_parse_rewrite_payload(text)
+    if data:
+        query = data.get("query", "")
+        if not isinstance(query, str):
+            query = str(query)
+        query = query.strip()
 
-        if isinstance(data, dict):
-            query = data.get("query", "")
-            if not isinstance(query, str):
-                query = str(query)
-            query = query.strip()
+        topic = data.get("tavily_topic") or data.get("topic") or None
+        if isinstance(topic, str):
+            topic_norm = topic.strip().lower()
+        else:
+            topic_norm = ""
+        topic_out = topic_norm if topic_norm in ALLOWED_TAVILY_TOPICS else None
 
-            topic = data.get("tavily_topic") or data.get("topic") or None
-            if isinstance(topic, str):
-                topic_norm = topic.strip().lower()
-            else:
-                topic_norm = ""
-            topic_out = topic_norm if topic_norm in _ALLOWED_TAVILY_TOPICS else None
-
-            return query, topic_out
+        return query, topic_out
 
     return raw_str, None
