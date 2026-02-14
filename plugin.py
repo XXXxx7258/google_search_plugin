@@ -587,7 +587,7 @@ class WebSearchTool(BaseTool):
             [输出]
             - 如果无需搜索：请只输出 `无需搜索`。
             - 否则：请只输出 JSON（不要输出解释），格式如下：
-              {{"query": "<搜索关键词>", "tavily_topic": "news|general|"}}。
+              {{"query": "<搜索关键词>", "tavily_topic": "news|general|"}}
             """
         ).strip()
 
