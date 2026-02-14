@@ -73,7 +73,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 - `tavily_search_depth` (str, choices: basic/advanced): Tavily 搜索深度。
 - `tavily_include_answer` (bool): 是否返回 Tavily 的答案。
 - `tavily_include_raw_content` (bool): 是否返回网页正文片段。
-- `tavily_topic` (str): 主题参数，如 `general` 或 `news`。
+- `tavily_topic` (str): 主题参数，如 `general` 或 `news`；留空表示由插件内部模型按问题自动判断（也可由工具调用方传入 `tavily_topic` 覆写）。
 - `tavily_turbo` (bool): Tavily Turbo 模式。
 - `you_enabled` (bool): 是否启用 You Search。
 - `you_news_enabled` (bool): 是否启用 You Live News（early access）。
@@ -118,6 +118,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 感谢[heitiehu-beep](https://github.com/heitiehu-beep),[wanshangovo](https://github.com/wanshangovo)
 提供的代码优化以及改进
 ---
+
 
 
 
