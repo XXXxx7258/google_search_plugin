@@ -43,6 +43,7 @@ from .search_engines.you import (
     YouImagesEngine,
 )
 from .tools.abbreviation_tool import AbbreviationTool
+from .tools.rewrite_output import ALLOWED_TAVILY_TOPICS, parse_rewrite_output
 
 # 抑制readability的ruthless removal警告
 warnings.filterwarnings("ignore", message=".*ruthless removal.*")
@@ -130,6 +131,7 @@ class WebSearchTool(BaseTool):
     description: str = "谷歌搜索工具。当见到有人发出疑问或者遇到不熟悉的事情时候，直接使用它获得最新知识！"
     parameters: List[Tuple[str, ToolParamType, str, bool, None]] = [
         ("question", ToolParamType.STRING, "需要搜索的消息", True, None),
+        ("tavily_topic", ToolParamType.STRING, "可选：Tavily topic 覆写（general/news）；留空则由模型自动判断。", False, None),
     ]
     available_for_llm: bool = True
     
@@ -212,13 +214,20 @@ class WebSearchTool(BaseTool):
         if not question:
             return {"name": self.name, "content": "问题为空，无法执行搜索。"}
 
+        tavily_topic = function_args.get("tavily_topic")
+        if isinstance(tavily_topic, str):
+            tavily_topic = tavily_topic.strip().lower()
+        else:
+            tavily_topic = ""
+        tavily_topic_override = tavily_topic if tavily_topic in ALLOWED_TAVILY_TOPICS else None
+
         try:
             if self._is_url(question):
                 logger.info(f"检测到URL输入，直接访问并总结: {question}")
                 result_content = await self._execute_direct_url_summary(question)
             else:
                 logger.info(f"开始执行搜索，原始问题: {question}")
-                result_content = await self._execute_model_driven_search(question)
+                result_content = await self._execute_model_driven_search(question, tavily_topic=tavily_topic_override)
             return {"name": self.name, "content": result_content}
         except Exception as e:
             logger.error(f"搜索执行异常: {e}", exc_info=True)
@@ -292,7 +301,7 @@ class WebSearchTool(BaseTool):
             """
         ).strip()
 
-    async def _execute_model_driven_search(self, question: str) -> str:
+    async def _execute_model_driven_search(self, question: str, *, tavily_topic: Optional[str] = None) -> str:
         """执行模型驱动的智能搜索流程"""
         # 1. 获取聊天上下文
         time_gap = self.model_config.get("context_time_gap", 300)
@@ -319,18 +328,34 @@ class WebSearchTool(BaseTool):
 
         # 3. 调用 LLM 进行查询重写
         logger.info("调用LLM进行查询重写...")
-        rewritten_query = await self._call_llm(rewrite_prompt)
-        if not rewritten_query or "无需搜索" in rewritten_query:
-            logger.info("模型判断无需搜索或无法生成搜索词。")
-            return rewritten_query or "根据上下文分析，我无法确定需要搜索的具体内容。"
+        rewrite_output = await self._call_llm(rewrite_prompt)
+        rewrite_output = rewrite_output.strip() if rewrite_output else ""
+        if not rewrite_output:
+            logger.info("模型未返回查询重写结果。")
+            return "根据上下文分析，我无法确定需要搜索的具体内容。"
+        if "无需搜索" in rewrite_output:
+            logger.info("模型判断无需搜索。")
+            return rewrite_output
+
+        rewritten_query, model_tavily_topic = parse_rewrite_output(rewrite_output)
+        if not rewritten_query:
+            logger.info("模型未能生成有效搜索词。")
+            return rewrite_output
 
         logger.info(f"模型重写后的搜索查询: {rewritten_query}")
+        if model_tavily_topic:
+            logger.info(f"模型建议 Tavily topic: {model_tavily_topic}")
 
         # 4. 执行后端搜索
         self.last_success_engine = None
         self.last_tavily_answer = None
         max_results = self.backend_config.get("max_results", 10)
-        search_results = await self._search_with_fallback(rewritten_query, max_results)
+        tavily_topic_override = tavily_topic or model_tavily_topic
+        search_results = await self._search_with_fallback(
+            rewritten_query,
+            max_results,
+            tavily_topic=tavily_topic_override,
+        )
 
         if not search_results:
             return f"关于「{rewritten_query}」，我没有找到相关的网络信息。"
@@ -553,10 +578,16 @@ class WebSearchTool(BaseTool):
             2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
             3.  如果提问模糊（如使用了“它”、“那个”等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
             4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
-            5.  输出的关键词应该简洁、明确，适合搜索引擎。
+            5.  额外给出一个 `tavily_topic` 建议：
+                - 当问题强调“最新/近期/实时动态/新闻事件”时，优先输出 `news`。
+                - 当问题更偏向“通用知识/历史背景/教程/文档/概念解释”时，优先输出 `general`。
+                - 不确定时留空字符串（""）。
+            6.  输出的关键词应该简洁、明确，适合搜索引擎。
 
             [输出]
-            请只输出最终的搜索关键词，不要包含任何其他解释或说明。
+            - 如果无需搜索：请只输出 `无需搜索`。
+            - 否则：请只输出 JSON（不要输出解释），格式如下：
+              {{"query": "<搜索关键词>", "tavily_topic": "news|general|"}}
             """
         ).strip()
 
@@ -600,7 +631,13 @@ class WebSearchTool(BaseTool):
         ).strip()
 
     
-    async def _search_with_fallback(self, query: str, num_results: int) -> List[SearchResult]:
+    async def _search_with_fallback(
+        self,
+        query: str,
+        num_results: int,
+        *,
+        tavily_topic: Optional[str] = None,
+    ) -> List[SearchResult]:
         """带降级的搜索
         
         Args:
@@ -648,7 +685,10 @@ class WebSearchTool(BaseTool):
                 
             try:
                 # 调用基类中统一的、带重试的方法
-                results = await engine.search(query, num_results)
+                if engine_name == "tavily":
+                    results = await engine.search(query, num_results, topic=tavily_topic)  # type: ignore[call-arg]
+                else:
+                    results = await engine.search(query, num_results)
                 if results:
                     logger.info(f"{engine_name} 搜索成功，返回 {len(results)} 条结果")
                     self.last_success_engine = engine_name
@@ -818,7 +858,7 @@ class WebSearchTool(BaseTool):
             tasks = [self._fetch_page_content(session, url) for url in urls_to_fetch]
             content_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            content_map = dict(zip(urls_to_fetch, content_results))
+            content_map = dict(zip(urls_to_fetch, content_results, strict=True))
             for result in results:
                 url = result.url
                 if not url:
@@ -1209,7 +1249,7 @@ class google_search_simple(BasePlugin):
             "tavily_search_depth": ConfigField(type=str, default="basic", choices=["basic", "advanced"], description="搜索深度"),
             "tavily_include_raw_content": ConfigField(type=bool, default=False, description="是否返回网页原始内容"),
             "tavily_include_answer": ConfigField(type=bool, default=True, description="是否返回 Tavily 生成的答案"),
-            "tavily_topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'"),
+            "tavily_topic": ConfigField(type=str, default="", description="可选的主题参数，例如 'general' 或 'news'；留空则由模型自动判断"),
             "tavily_turbo": ConfigField(type=bool, default=False, description="是否启用 Tavily Turbo 模式"),
             "you_enabled": ConfigField(type=bool, default=False, description="是否启用 You Search"),
             "you_news_enabled": ConfigField(type=bool, default=False, description="是否启用 You Live News（early access）"),
