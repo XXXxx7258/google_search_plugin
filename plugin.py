@@ -43,7 +43,7 @@ from .search_engines.you import (
     YouImagesEngine,
 )
 from .tools.abbreviation_tool import AbbreviationTool
-from .tools.rewrite_output import parse_rewrite_output
+from .tools.rewrite_output import ALLOWED_TAVILY_TOPICS, parse_rewrite_output
 
 # 抑制readability的ruthless removal警告
 warnings.filterwarnings("ignore", message=".*ruthless removal.*")
@@ -219,7 +219,7 @@ class WebSearchTool(BaseTool):
             tavily_topic = tavily_topic.strip().lower()
         else:
             tavily_topic = ""
-        tavily_topic_override = tavily_topic if tavily_topic in {"general", "news"} else None
+        tavily_topic_override = tavily_topic if tavily_topic in ALLOWED_TAVILY_TOPICS else None
 
         try:
             if self._is_url(question):
@@ -858,7 +858,7 @@ class WebSearchTool(BaseTool):
             tasks = [self._fetch_page_content(session, url) for url in urls_to_fetch]
             content_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            content_map = dict(zip(urls_to_fetch, content_results, strict=False))
+            content_map = dict(zip(urls_to_fetch, content_results, strict=True))
             for result in results:
                 url = result.url
                 if not url:
