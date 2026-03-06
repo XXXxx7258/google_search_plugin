@@ -119,6 +119,9 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 提供的代码优化以及改进
 ---
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/image?repos=XXXxx7258/google_search_plugin&type=timeline&legend=top-left)](https://www.star-history.com/?repos=XXXxx7258%2Fgoogle_search_plugin&type=timeline&legend=top-left)
 
 
 
