@@ -54,6 +54,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 - `fetch_content` (bool): 是否抓取网页正文供模型阅读。
 - `content_timeout` (int): 网页抓取的超时时间。
 - `max_content_length` (int): 抓取的单个网页最大内容长度。
+- `zhihu_cookies` (str): 知乎专用抓取所需的 Cookie 字符串；配置后，插件会对知乎链接启用专用抓取逻辑。若你是旧配置用户，需手动在 `config.toml` 的 `[search_backend]` 下补上该项。
 
 ### `[engines]`
 对每个具体搜索引擎的可选配置项：

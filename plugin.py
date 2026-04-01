@@ -231,7 +231,7 @@ class WebSearchTool(BaseTool):
             return {"name": self.name, "content": result_content}
         except Exception as e:
             logger.error(f"搜索执行异常: {e}", exc_info=True)
-            return {"name": self.name, "content": f"搜索失败: {str(e)}"}
+            return {"name": self.name, "content": ""}
 
     def _is_url(self, text: str) -> bool:
         """检测文本是否为URL"""
@@ -250,6 +250,16 @@ class WebSearchTool(BaseTool):
             return False
         return True
 
+    def _is_zhihu_url(self, url: str) -> bool:
+        """判断 URL 是否属于知乎站点。"""
+        if not url:
+            return False
+        try:
+            hostname = (urlparse(url).hostname or "").lower()
+        except ValueError:
+            return False
+        return hostname in {"www.zhihu.com", "zhihu.com", "zhuanlan.zhihu.com"}
+
     async def _execute_direct_url_summary(self, url: str) -> str:
         """直接访问URL并总结其内容"""
         logger.info(f"开始直接访问URL: {url}")
@@ -257,7 +267,8 @@ class WebSearchTool(BaseTool):
             content = await self._fetch_page_content(session, url)
 
         if not content:
-            return f"无法访问该网页或提取内容: {url}"
+            logger.info(f"URL 内容抓取失败，返回空内容: {url}")
+            return ""
 
         logger.info(f"成功抓取网页内容，长度: {len(content)}")
         summarize_prompt = self._build_url_summarize_prompt(url, content)
@@ -711,6 +722,9 @@ class WebSearchTool(BaseTool):
         Returns:
             提取的正文内容，失败时返回None
         """
+        if self._is_zhihu_url(url):
+            return await self._fetch_zhihu_content(url)
+
         timeout = self.backend_config.get("content_timeout", 10)
         max_length = self.backend_config.get("max_content_length", 3000)
         
@@ -804,6 +818,251 @@ class WebSearchTool(BaseTool):
         except Exception as e:
             logger.error(f"抓取内容时发生未知错误: {url}, 错误: {e}")
             return None
+
+    async def _fetch_zhihu_content(self, url: str) -> Optional[str]:
+        """抓取知乎页面内容。"""
+        zhihu_cookies = str(self.backend_config.get("zhihu_cookies", "") or "").strip()
+        if not zhihu_cookies:
+            logger.info(f"[zhihu] cookies missing: {url}")
+            return None
+        max_length = self.backend_config.get("max_content_length", 3000)
+
+        for profile_name, profile_url, headers, impersonate in self._build_zhihu_request_profiles(url, zhihu_cookies):
+            try:
+                response_ctx = await self._request_zhihu_page(profile_url, headers=headers, impersonate=impersonate)
+            except Exception as e:
+                logger.info(f"[zhihu] request failed via {profile_name}: {profile_url}, error={e}")
+                continue
+
+            html_text = str(response_ctx.get("text") or "")
+            final_url = str(response_ctx.get("final_url") or profile_url)
+            status_code = int(response_ctx.get("status_code") or 0)
+
+            if self._is_zhihu_challenge_page(html_text, status_code):
+                logger.info(f"[zhihu] request challenged via {profile_name}: {profile_url} -> {final_url}")
+                continue
+
+            if self._is_zhihu_login_page(final_url, html_text):
+                logger.info(f"[zhihu] redirected to login via {profile_name}: {profile_url} -> {final_url}")
+                continue
+
+            initial_data = self._extract_zhihu_initial_data(html_text)
+            if not initial_data:
+                logger.info(f"[zhihu] initialData missing via {profile_name}: {profile_url} -> {final_url}")
+                continue
+
+            content = self._extract_zhihu_content_from_initial_data(profile_url, initial_data)
+            if content:
+                return content[:max_length]
+
+            logger.info(f"[zhihu] target entity not found via {profile_name}: {profile_url} -> {final_url}")
+
+        return None
+
+    def _build_zhihu_request_profiles(
+        self, url: str, zhihu_cookies: str
+    ) -> List[Tuple[str, str, Dict[str, str], str]]:
+        base_headers = {
+            "accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,image/apng,*/*;q=0.8"
+            ),
+            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "referer": "https://www.zhihu.com/",
+            "origin": "https://www.zhihu.com",
+            "cache-control": "no-cache",
+            "pragma": "no-cache",
+            "cookie": zhihu_cookies,
+        }
+        return [
+            (
+                "desktop",
+                url,
+                {
+                    **base_headers,
+                    "user-agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                },
+                "chrome",
+            ),
+            (
+                "ios",
+                url,
+                {
+                    **base_headers,
+                    "user-agent": (
+                        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 "
+                        "(KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+                    ),
+                },
+                "safari_ios",
+            ),
+            (
+                "mobile",
+                url,
+                {
+                    **base_headers,
+                    "user-agent": (
+                        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                    ),
+                },
+                "chrome_android",
+            ),
+        ]
+
+    async def _request_zhihu_page(
+        self,
+        url: str,
+        *,
+        headers: Dict[str, str],
+        impersonate: str,
+    ) -> Dict[str, Any]:
+        from curl_cffi import requests as curl_requests
+
+        timeout = self.backend_config.get("content_timeout", 10)
+        proxy = self.backend_config.get("proxy")
+
+        def do_request() -> Any:
+            return curl_requests.get(
+                url,
+                headers=headers,
+                impersonate=impersonate,
+                proxies={"https": proxy, "http": proxy} if proxy else None,
+                timeout=timeout,
+                allow_redirects=True,
+            )
+
+        response = await asyncio.to_thread(do_request)
+        return {
+            "status_code": int(response.status_code),
+            "final_url": str(response.url),
+            "text": str(response.text),
+        }
+
+    def _extract_zhihu_initial_data(self, html_text: str) -> Optional[Dict[str, Any]]:
+        soup = BeautifulSoup(html_text, "html.parser")
+        node = soup.select_one('script#js-initialData[type="text/json"]')
+        if node is None:
+            return None
+        raw = node.get_text(strip=True)
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return None
+        return payload if isinstance(payload.get("initialState"), dict) else None
+
+    def _extract_zhihu_content_from_initial_data(self, url: str, initial_data: Dict[str, Any]) -> Optional[str]:
+        article_match = re.search(r"zhuanlan\.zhihu\.com/p/(?P<article_id>\d+)", url)
+        if article_match:
+            return self._extract_zhihu_article_content(article_match.group("article_id"), initial_data)
+
+        answer_match = re.search(r"zhihu\.com/question/(?P<question_id>\d+)/answer/(?P<answer_id>\d+)", url)
+        if answer_match:
+            return self._extract_zhihu_answer_content(
+                answer_match.group("question_id"),
+                answer_match.group("answer_id"),
+                initial_data,
+            )
+
+        question_match = re.search(r"zhihu\.com/question/(?P<question_id>\d+)(?:[/?#]|$)", url)
+        if question_match:
+            return self._extract_zhihu_question_content(question_match.group("question_id"), initial_data)
+
+        return None
+
+    def _extract_zhihu_article_content(self, article_id: str, initial_data: Dict[str, Any]) -> Optional[str]:
+        article = ((self._zhihu_entities(initial_data).get("articles") or {}).get(article_id) or {})
+        if not isinstance(article, dict):
+            return None
+        return self._join_zhihu_text_parts(
+            str(article.get("title") or "").strip(),
+            self._extract_text_from_html_fragment(str(article.get("content") or "")),
+        )
+
+    def _extract_zhihu_answer_content(
+        self,
+        question_id: str,
+        answer_id: str,
+        initial_data: Dict[str, Any],
+    ) -> Optional[str]:
+        entities = self._zhihu_entities(initial_data)
+        question = ((entities.get("questions") or {}).get(question_id) or {})
+        answer = ((entities.get("answers") or {}).get(answer_id) or {})
+        if not isinstance(answer, dict):
+            return None
+        return self._join_zhihu_text_parts(
+            str(question.get("title") or "").strip(),
+            self._extract_text_from_html_fragment(str(answer.get("content") or "")),
+        )
+
+    def _extract_zhihu_question_content(self, question_id: str, initial_data: Dict[str, Any]) -> Optional[str]:
+        entities = self._zhihu_entities(initial_data)
+        question = ((entities.get("questions") or {}).get(question_id) or {})
+        if not isinstance(question, dict):
+            return None
+
+        initial_state = initial_data.get("initialState") or {}
+        answer_map = ((initial_state.get("question") or {}).get("answers") or {}).get(question_id) or {}
+        answer_ids = answer_map.get("ids") or []
+        first_answer_id = None
+        if answer_ids:
+            first_entry = answer_ids[0]
+            if isinstance(first_entry, dict):
+                first_answer_id = first_entry.get("target")
+            else:
+                first_answer_id = first_entry
+
+        answer = {}
+        if first_answer_id:
+            answer = ((entities.get("answers") or {}).get(str(first_answer_id)) or {})
+
+        return self._join_zhihu_text_parts(
+            str(question.get("title") or "").strip(),
+            self._extract_text_from_html_fragment(str(question.get("detail") or "")),
+            self._extract_text_from_html_fragment(str(answer.get("content") or "")) if isinstance(answer, dict) else "",
+        )
+
+    def _extract_text_from_html_fragment(self, html_text: str) -> str:
+        if not html_text:
+            return ""
+        soup = BeautifulSoup(html_text, "html.parser")
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        return soup.get_text(separator="\n", strip=True).strip()
+
+    def _join_zhihu_text_parts(self, *parts: str) -> Optional[str]:
+        normalized = [part.strip() for part in parts if isinstance(part, str) and part.strip()]
+        if not normalized:
+            return None
+        return "\n\n".join(normalized)
+
+    def _zhihu_entities(self, initial_data: Dict[str, Any]) -> Dict[str, Any]:
+        initial_state = initial_data.get("initialState") or {}
+        entities = initial_state.get("entities") or {}
+        return entities if isinstance(entities, dict) else {}
+
+    def _is_zhihu_challenge_page(self, html_text: str, status_code: int) -> bool:
+        lowered = html_text.lower()
+        return (
+            'id="zh-zse-ck"' in lowered
+            or "static.zhihu.com/zse-ck/" in lowered
+            or 'appname":"zse_ck"' in lowered
+            or (status_code == 403 and "zse-ck" in lowered)
+        )
+
+    def _is_zhihu_login_page(self, final_url: str, html_text: str) -> bool:
+        lowered_url = final_url.lower()
+        lowered_html = html_text.lower()
+        return (
+            "/signin" in lowered_url
+            or "/signup" in lowered_url
+            or "<title>知乎 - 有问题，就会有答案</title>" in lowered_html
+        )
 
     async def _fetch_content_for_results(self, results: List[SearchResult]) -> List[SearchResult]:
         """为搜索结果并发抓取内容，增强了异常处理和格式化
@@ -1161,6 +1420,7 @@ class google_search_simple(BasePlugin):
     python_dependencies: List[str] = [
         "aiohttp>=3.8.0",
         "beautifulsoup4>=4.11.0",
+        "curl_cffi>=0.7.0",
         "lxml>=4.9.0",
         "httpx>=0.25.0",
         "readability-lxml>=0.8.1",
@@ -1216,6 +1476,13 @@ class google_search_simple(BasePlugin):
             "fetch_content": ConfigField(type=bool, default=True, description="是否抓取网页内容"),
             "content_timeout": ConfigField(type=int, default=10, description="内容抓取超时（秒）"),
             "max_content_length": ConfigField(type=int, default=3000, description="最大内容长度"),
+            "zhihu_cookies": ConfigField(
+                type=str,
+                default="",
+                description="知乎专用抓取使用的 Cookie 字符串；留空则不启用知乎专用抓取。",
+                input_type="textarea",
+                rows=4,
+            ),
             "user_agents": ConfigField(
                 type=list,
                 default=[
