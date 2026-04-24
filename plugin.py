@@ -1,13 +1,15 @@
 import asyncio
-import random
-import time
-import re
-import json
 import base64
-import warnings
+import json
+import random
+import re
 import textwrap
+import time
+import tomllib
+import warnings
 from collections import deque
-from typing import List, Tuple, Type, Dict, Any, Optional, Deque
+from pathlib import Path
+from typing import Any, Deque, Dict, List, Optional, Tuple, Type
 from urllib.parse import urlparse
 
 import aiohttp
@@ -49,6 +51,41 @@ from .tools.rewrite_output import ALLOWED_TAVILY_TOPICS, parse_rewrite_output
 warnings.filterwarnings("ignore", message=".*ruthless removal.*")
 
 logger = get_logger("google_search")
+_MISSING = object()
+
+
+def _nested_config_get(data: Any, key: str, default: Any = None) -> Any:
+    """读取嵌套配置值。"""
+    if not data:
+        return default
+    current = data
+    for part in key.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        else:
+            return default
+    return current
+
+
+def _load_plugin_config_from_disk(config_path: Path) -> Dict[str, Any]:
+    """从磁盘读取插件配置文件。"""
+    if not config_path.exists():
+        return {}
+    try:
+        with config_path.open("rb") as file:
+            loaded = tomllib.load(file)
+    except Exception as exc:
+        logger.warning(f"读取插件配置失败 {config_path}: {exc}")
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _build_config_signature(config: Any) -> str:
+    """生成可比较的配置签名，用于懒重初始化。"""
+    try:
+        return json.dumps(config or {}, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return repr(config)
 
 
 def _build_engine_config(engine_name: str, engines_config: Dict[str, Any], common_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -150,6 +187,8 @@ class WebSearchTool(BaseTool):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.chat_id: str = ""
+        self._runtime_config_signature: Optional[str] = None
         self._initialize_engines()
 
     def _identity_header(self) -> str:
@@ -161,7 +200,7 @@ class WebSearchTool(BaseTool):
 
     def _initialize_engines(self) -> None:
         """初始化搜索引擎"""
-        config = self.plugin_config
+        config = self.plugin_config if isinstance(self.plugin_config, dict) else {}
         engines_config = config.get("engines", {})
         backend_config = config.get("search_backend", {})
 
@@ -199,6 +238,23 @@ class WebSearchTool(BaseTool):
         # 存储配置供后续使用
         self.model_config = config.get("model_config", {})
         self.backend_config = config.get("search_backend", {})
+        self._runtime_config_signature = _build_config_signature(config)
+
+    def _ensure_initialized(self) -> None:
+        """确保组件使用当前注入的配置完成初始化。"""
+        current_signature = _build_config_signature(self.plugin_config if isinstance(self.plugin_config, dict) else {})
+        if current_signature != self._runtime_config_signature:
+            self._initialize_engines()
+
+    def _sync_runtime_context(self) -> None:
+        """同步运行时聊天上下文。"""
+        chat_stream = getattr(self, "chat_stream", None)
+        self.chat_id = str(
+            getattr(chat_stream, "session_id", "")
+            or getattr(chat_stream, "chat_id", "")
+            or getattr(self, "chat_id", "")
+            or ""
+        )
 
     async def execute(self, function_args: Dict[str, Any]) -> Dict[str, str]:
         """执行搜索
@@ -209,6 +265,9 @@ class WebSearchTool(BaseTool):
         Returns:
             包含 'name' 和 'content' 键的结果字典
         """
+        self._sync_runtime_context()
+        self._ensure_initialized()
+
         question = function_args.get("question", "")
         question = question.strip()
         if not question:
@@ -332,7 +391,7 @@ class WebSearchTool(BaseTool):
             context_messages = message_api.get_messages_by_time(
                 **query_kwargs,
             )
-        context_str = message_api.build_readable_messages_to_str(context_messages)
+        context_str = self._build_context_messages_text(context_messages)
 
         # 2. 构建查询重写 Prompt
         rewrite_prompt = self._build_rewrite_prompt(question, context_str)
@@ -394,6 +453,18 @@ class WebSearchTool(BaseTool):
 
         return final_answer
 
+    def _build_context_messages_text(self, context_messages: List[Any]) -> str:
+        """兼容不同旧版 message_api 实现的上下文拼接入口。"""
+        build_to_str = getattr(message_api, "build_readable_messages_to_str", None)
+        if callable(build_to_str):
+            return str(build_to_str(context_messages) or "")
+
+        build_readable = getattr(message_api, "build_readable_messages", None)
+        if callable(build_readable):
+            return str(build_readable(context_messages) or "")
+
+        return ""
+
     async def _call_llm(self, prompt: str) -> str:
         """统一的LLM调用函数
         
@@ -404,31 +475,15 @@ class WebSearchTool(BaseTool):
             LLM生成的文本响应
         """
         try:
-            # 选择模型
-            models = llm_api.get_available_models()
-            if not models:
-                raise ValueError("系统中没有可用的LLM模型配置。")
-
-            # 从本插件配置中获取目标模型名称，默认为 'replyer'
-            target_model_name = self.model_config.get("model_name", "replyer")
-            model_config = models.get(target_model_name)
-
-            # 如果找不到用户指定的模型，则记录警告并使用默认模型
-            if not model_config:
-                logger.warning(f"在系统配置中未找到名为 '{target_model_name}' 的模型，将回退到系统默认模型。")
-                default_model_name, model_config = next(iter(models.items()))
-                logger.info(f"使用系统默认模型: {default_model_name}")
-            else:
-                logger.info(f"使用模型: {target_model_name}")
-
-            # 获取温度配置
+            target_model_name = str(self.model_config.get("model_name", "replyer") or "replyer")
             temperature = self.model_config.get("temperature")
+            logger.info(f"使用兼容层 LLM 调用，目标模型: {target_model_name}")
 
-            # 直接使用系统llm_api调用选定的模型
             success, content, _, _ = await llm_api.generate_with_model(
                 prompt,
-                model_config,
-                temperature=temperature
+                target_model_name,
+                request_type="plugin.generate",
+                temperature=temperature,
             )
             if success:
                 return content.strip() if content else ""
@@ -1228,22 +1283,32 @@ class ImageSearchAction(BaseAction):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self._runtime_config_signature: Optional[str] = None
         self._image_history: Dict[str, Deque[Tuple[str, float]]] = {}
         self._image_history_max_size: int = 30
         self._image_repeat_window_seconds: int = 30 * 60
+        self.enabled = False
+        self.backend_config = {}
+        self._ensure_initialized()
 
-        # 检查是否启用图片搜索功能
+    def _ensure_initialized(self) -> None:
+        """根据最新配置初始化图片搜索运行时状态。"""
+        current_signature = _build_config_signature(self.plugin_config if isinstance(self.plugin_config, dict) else {})
+        if current_signature == self._runtime_config_signature:
+            return
+
+        config = self.plugin_config if isinstance(self.plugin_config, dict) else {}
         enabled_value = self.get_config("actions.image_search_enabled", False)
         self.enabled = bool(enabled_value) if enabled_value is not None else False
+        self.backend_config = config.get("search_backend", {})
+        self._runtime_config_signature = current_signature
 
         if not self.enabled:
             logger.info("图片搜索功能已在配置中禁用")
             return
 
-        # 仅在启用时初始化引擎
-        config = self.plugin_config
         engines_config = config.get("engines", {})
-        backend_config = config.get("search_backend", {})
+        backend_config = self.backend_config
         common_config = {
             "timeout": backend_config.get("timeout", 20),
             "proxy": backend_config.get("proxy")
@@ -1260,7 +1325,6 @@ class ImageSearchAction(BaseAction):
         self.duckduckgo = DuckDuckGoEngine(duckduckgo_config)
         self.you_images = YouImagesEngine(you_images_config)
 
-        self.backend_config = config.get("search_backend", {})
         max_results = self.backend_config.get("max_results")
         if isinstance(max_results, int) and max_results > 0:
             # 允许缓存比配置更多的结果，以便轮换图片
@@ -1272,6 +1336,8 @@ class ImageSearchAction(BaseAction):
         Returns:
             (是否成功, 状态描述) 的元组
         """
+        self._ensure_initialized()
+
         # 检查是否启用
         if not getattr(self, 'enabled', False):
             await self.send_text(
@@ -1429,6 +1495,8 @@ class google_search_simple(BasePlugin):
         "trafilatura>=1.6.0",
     ]
     config_file_name: str = "config.toml"
+    log_prefix: str = "[google_search_plugin]"
+    plugin_config: Dict[str, Any] = {}
 
     config_schema: Dict[str, Dict[str, ConfigField]] = {
         "plugin": {
@@ -1605,6 +1673,21 @@ class google_search_simple(BasePlugin):
         
         return components
 
+    def set_plugin_config(self, config: Optional[Dict[str, Any]]) -> None:
+        """兼容层注入插件配置。"""
+        self.plugin_config = config or {}
+
+    def get_config(self, key: str, default: Any = None) -> Any:
+        """在兼容层下读取插件配置。"""
+        runtime_value = _nested_config_get(self.plugin_config, key, _MISSING)
+        if runtime_value is not _MISSING:
+            return runtime_value
+
+        config_path = Path(__file__).with_name(self.config_file_name)
+        disk_config = _load_plugin_config_from_disk(config_path)
+        return _nested_config_get(disk_config, key, default)
+
     def _load_plugin_config(self) -> None:
-        """使用基类加载配置（平铺 schema 无需自定义处理）。"""
-        super()._load_plugin_config()
+        """兼容旧调用路径：从当前插件目录重新载入配置。"""
+        config_path = Path(__file__).with_name(self.config_file_name)
+        self.set_plugin_config(_load_plugin_config_from_disk(config_path))
