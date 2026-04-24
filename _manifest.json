@@ -15,8 +15,8 @@
     "issues": "https://github.com/XXXxx7258/google_search_plugin/issues"
   },
   "host_application": {
-    "min_version": "1.0.0",
-    "max_version": "1.99.99"
+    "min_version": "0.10.0",
+    "max_version": "1.14.5"
   },
   "sdk": {
     "min_version": "2.0.0",
