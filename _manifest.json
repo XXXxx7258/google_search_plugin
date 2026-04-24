@@ -1,67 +1,40 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
+  "version": "3.2.0",
   "name": "麦麦联网插件（search plugin）",
-  "version": "1.2.0",
-  "description": "支持多个搜索引擎的网络搜索以及聚合翻译搜索以及图片搜索插件，具有自动降级功能。",
+  "description": "支持多个搜索引擎的网络搜索、缩写翻译以及图片搜索，并提供自动降级能力。",
   "author": {
     "name": "晴空",
     "url": "https://github.com/XXXxx7258"
   },
   "license": "AGPL",
-
-  "host_application": {
-    "min_version": "0.10.0"
+  "urls": {
+    "repository": "https://github.com/XXXxx7258/google_search_plugin",
+    "homepage": "https://github.com/XXXxx7258/google_search_plugin",
+    "documentation": "https://github.com/XXXxx7258/google_search_plugin#readme",
+    "issues": "https://github.com/XXXxx7258/google_search_plugin/issues"
   },
-  "homepage_url": "https://github.com/XXXxx7258/google_search_plugin",
-  "repository_url": "https://github.com/XXXxx7258/google_search_plugin",
-  "keywords": [
-    "google",
-    "search",
-    "web",
-    "internet",
-    "图片",
-    "查询",
-    "搜索",
-    "多引擎",
-    "翻译",
-    "缩写",
-    "nbnhhsh"
+  "host_application": {
+    "min_version": "0.10.0",
+    "max_version": "1.14.5"
+  },
+  "sdk": {
+    "min_version": "2.0.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": [
+    "llm.generate",
+    "send.text",
+    "send.image"
   ],
-  "categories": [
-    "Search",
-    "Utilities",
-    "Translation",
-    "image"
-  ],
-  "default_locale": "zh-CN",
-  "locales_path": "_locales",
-  "plugin_info": {
-    "is_built_in": false,
-    "plugin_type": "search",
-    "components": [
-      {
-        "type": "tool",
-        "name": "web_search",
-        "description": "进行网络搜索并聚合结果"
-      },
-      {
-        "type": "tool",
-        "name": "abbreviation_translate",
-        "description": "翻译中文网络缩写词汇"
-      }
-    ],
-    "features": [
-      "多引擎支持：Google、Bing、搜狗",
-      "自动降级机制",
-      "可配置的搜索引擎顺序",
-      "重试机制",
-      "丰富的配置选项",
-      "中文缩写翻译功能",
-      "神奇海螺API集成",
-      "翻译结果缓存机制"
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": [
+      "zh-CN"
     ]
-  }
-
+  },
+  "id": "xxxxx7258.google-search-plugin"
 }
 
 
