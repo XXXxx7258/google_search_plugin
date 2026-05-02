@@ -193,25 +193,6 @@ class EnginesSection(PluginConfigBase):
     you_images_enabled: bool = Field(default=False, description="是否启用 You Images(early access)")
 
 
-class StorageSection(PluginConfigBase):
-    """搜索结果落库参数"""
-
-    __ui_label__ = "存储"
-    __ui_icon__ = "database"
-    __ui_order__ = 5
-
-    enable_store: bool = Field(default=True, description="是否将搜索结果写入 chat_history")
-    store_top_k: int = Field(default=5, description="每次写入的搜索结果条数上限")
-    dedup_window_seconds: int = Field(
-        default=600,
-        description="同一主题写入的去重时间窗口(秒),0 表示不去重",
-    )
-    final_answer_max_len: int = Field(
-        default=1200,
-        description="original_text 中 final_answer 的截断长度,0 表示不截断",
-    )
-
-
 class TranslationSection(PluginConfigBase):
     """缩写翻译(神奇海螺 nbnhhsh)参数"""
 
@@ -237,5 +218,4 @@ class GoogleSearchPluginConfig(PluginConfigBase):
     actions: ActionsSection = Field(default_factory=ActionsSection)
     search_backend: SearchBackendSection = Field(default_factory=SearchBackendSection)
     engines: EnginesSection = Field(default_factory=EnginesSection)
-    storage: StorageSection = Field(default_factory=StorageSection)
     translation: TranslationSection = Field(default_factory=TranslationSection)

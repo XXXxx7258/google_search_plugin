@@ -21,7 +21,6 @@ from maibot_sdk.types import ActivationType, ToolParameterInfo, ToolParamType
 from .config import GoogleSearchPluginConfig
 from .pipelines.content_fetcher import ContentFetcher
 from .pipelines.engine_chain import EngineChain
-from .pipelines.history_writer import HistoryWriter
 from .pipelines.image_search_pipeline import ImageSearchPipeline
 from .pipelines.llm_runner import LLMRunner
 from .pipelines.search_pipeline import SearchPipeline
@@ -38,7 +37,6 @@ class GoogleSearchPlugin(MaiBotPlugin):
     # 运行时组件:在 on_load / on_config_update 中装配
     _engine_chain: Optional[EngineChain]
     _content_fetcher: Optional[ContentFetcher]
-    _history_writer: Optional[HistoryWriter]
     _llm_runner: Optional[LLMRunner]
     _search_pipeline: Optional[SearchPipeline]
     _url_pipeline: Optional[UrlPipeline]
@@ -49,7 +47,6 @@ class GoogleSearchPlugin(MaiBotPlugin):
         super().__init__()
         self._engine_chain = None
         self._content_fetcher = None
-        self._history_writer = None
         self._llm_runner = None
         self._search_pipeline = None
         self._url_pipeline = None
@@ -107,7 +104,6 @@ class GoogleSearchPlugin(MaiBotPlugin):
             zhihu_extractor=zhihu,
         )
         self._llm_runner = LLMRunner(self.ctx, cfg.models)
-        self._history_writer = HistoryWriter(self.ctx, cfg.storage)
         self._search_pipeline = SearchPipeline(
             self.ctx,
             models_cfg=cfg.models,
@@ -115,12 +111,10 @@ class GoogleSearchPlugin(MaiBotPlugin):
             engine_chain=self._engine_chain,
             content_fetcher=self._content_fetcher,
             llm_runner=self._llm_runner,
-            history_writer=self._history_writer,
         )
         self._url_pipeline = UrlPipeline(
             content_fetcher=self._content_fetcher,
             llm_runner=self._llm_runner,
-            history_writer=self._history_writer,
         )
         # 翻译器(NbnhhshTranslator 接 dict 配置)
         self._translator = NbnhhshTranslator(
@@ -151,7 +145,6 @@ class GoogleSearchPlugin(MaiBotPlugin):
             for v in (
                 self._engine_chain,
                 self._content_fetcher,
-                self._history_writer,
                 self._llm_runner,
                 self._search_pipeline,
                 self._url_pipeline,
@@ -220,7 +213,6 @@ class GoogleSearchPlugin(MaiBotPlugin):
                 self.ctx.logger.info("检测到 URL 输入,直接访问并总结: %s", question)
                 content = await self._url_pipeline.run(  # type: ignore[union-attr]
                     question,
-                    chat_id=stream_id,
                     bot_name=bot_name,
                 )
             else:
@@ -426,7 +418,6 @@ class GoogleSearchPlugin(MaiBotPlugin):
             for v in (
                 self._engine_chain,
                 self._content_fetcher,
-                self._history_writer,
                 self._llm_runner,
                 self._search_pipeline,
                 self._url_pipeline,

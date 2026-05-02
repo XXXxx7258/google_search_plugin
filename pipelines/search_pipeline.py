@@ -1,6 +1,9 @@
-"""主搜索流程:rewrite → engines → fetch → summarize → history。
+"""主搜索流程:rewrite → engines → fetch → summarize。
 
 从老 plugin.py 的 ``_execute_model_driven_search`` 抽出。
+
+注:工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表
+(``database_api.store_tool_info``),插件不再自己写 ChatHistory。
 """
 
 from __future__ import annotations
@@ -19,7 +22,6 @@ if TYPE_CHECKING:
     from ..config import ModelsSection, SearchBackendSection
     from .content_fetcher import ContentFetcher
     from .engine_chain import EngineChain
-    from .history_writer import HistoryWriter
     from .llm_runner import LLMRunner
 
 logger = logging.getLogger(__name__)
@@ -37,7 +39,6 @@ class SearchPipeline:
         engine_chain: "EngineChain",
         content_fetcher: "ContentFetcher",
         llm_runner: "LLMRunner",
-        history_writer: "HistoryWriter",
     ) -> None:
         self._ctx = ctx
         self._models = models_cfg
@@ -45,7 +46,6 @@ class SearchPipeline:
         self._engines = engine_chain
         self._fetcher = content_fetcher
         self._llm = llm_runner
-        self._history = history_writer
 
     async def run(
         self,
@@ -59,7 +59,7 @@ class SearchPipeline:
 
         Args:
             question: 用户原始问题
-            chat_id: 当前聊天流 ID(取上下文 + 落库)
+            chat_id: 当前聊天流 ID(取上下文用)
             bot_name: bot 昵称(prompt 用)
             tavily_topic_override: 调用方显式指定的 tavily topic(优先级高于模型建议)
 
@@ -118,16 +118,6 @@ class SearchPipeline:
         logger.info("调用 LLM 对搜索结果进行总结")
         final_answer = await self._llm.generate(summarize_prompt)
 
-        # ---- 6. 落库 ---- #
-        await self._history.record(
-            chat_id=chat_id,
-            original_question=question,
-            search_query=rewritten_query,
-            results=results,
-            final_answer=final_answer,
-            source_type="search",
-            last_success_engine=last_engine or None,
-        )
         return final_answer
 
     # ------------------------------------------------------------------ #

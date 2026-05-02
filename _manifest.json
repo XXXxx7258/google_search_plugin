@@ -26,9 +26,6 @@
   "capabilities": [
     "llm.generate",
     "message.get_by_time_in_chat",
-    "message.build_readable",
-    "message.get_recent",
-    "database.query",
     "config.get",
     "send.text",
     "send.image",
