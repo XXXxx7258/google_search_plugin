@@ -42,11 +42,16 @@ class LLMRunner:
             logger.warning("prompt 为空,跳过 LLM 调用")
             return ""
 
-        try:
-            target_model = str(self._config.model_name or "replyer")
-            temperature = self._config.temperature
-            logger.info("调用 ctx.llm.generate, model=%s temperature=%s", target_model, temperature)
+        target_model = str(self._config.model_name or "replyer")
+        temperature = self._config.temperature
+        logger.info(
+            "调用 ctx.llm.generate, model=%s temperature=%s prompt_len=%d",
+            target_model,
+            temperature,
+            len(prompt),
+        )
 
+        try:
             result = await self._ctx.llm.generate(
                 prompt=prompt,
                 model=target_model,            # ← 必须显式传,否则落到 embedding
@@ -57,13 +62,34 @@ class LLMRunner:
             return ""
 
         if not isinstance(result, dict):
-            logger.warning("ctx.llm.generate 返回非 dict: %r", type(result))
+            logger.warning("ctx.llm.generate 返回非 dict: type=%s value=%r", type(result).__name__, result)
             return ""
 
-        if not result.get("success"):
-            err = result.get("error") or result.get("response") or "<no error message>"
-            logger.error("LLM 调用失败 (model=%s): %s", target_model, err)
+        success = bool(result.get("success", False))
+        response_text = str(result.get("response") or "")
+        if not success:
+            err = result.get("error") or "<no error key>"
+            logger.error(
+                "LLM 调用失败 (model=%s): error=%s | full_result_keys=%s",
+                target_model,
+                err,
+                sorted(result.keys()),
+            )
             return ""
 
-        response_text = result.get("response", "") or ""
-        return str(response_text).strip()
+        if not response_text:
+            logger.warning(
+                "LLM 调用 success=True 但 response 为空 (model=%s) full_result_keys=%s",
+                target_model,
+                sorted(result.keys()),
+            )
+            return ""
+
+        preview = response_text[:200].replace("\n", "\\n")
+        logger.info(
+            "LLM 响应成功 (model=%s) response_len=%d preview=%r",
+            target_model,
+            len(response_text),
+            preview,
+        )
+        return response_text.strip()

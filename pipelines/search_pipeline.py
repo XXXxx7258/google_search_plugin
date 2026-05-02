@@ -147,12 +147,21 @@ class SearchPipeline:
         ``message_info.user_info.*`` 等必要字段,完全够用。
         """
         if not chat_id:
+            logger.info("_fetch_context: chat_id 为空,跳过")
             return ""
 
         time_gap = self._models.context_time_gap
         max_limit = self._models.context_max_limit
         current_ts = time.time()
         start_ts = current_ts - time_gap
+
+        logger.info(
+            "_fetch_context: chat_id=%s start_ts=%.3f end_ts=%.3f limit=%d",
+            chat_id,
+            start_ts,
+            current_ts,
+            max_limit,
+        )
 
         try:
             # SDK 类型注解写 str,实际 host 用 float() 强转,故传 number 即可
@@ -166,10 +175,29 @@ class SearchPipeline:
             logger.warning("get_by_time_in_chat 失败: %s", exc)
             return ""
 
-        if not isinstance(messages, list) or not messages:
+        logger.info(
+            "_fetch_context: get_by_time_in_chat 返回 type=%s",
+            type(messages).__name__,
+        )
+
+        if not isinstance(messages, list):
+            logger.warning("_fetch_context: messages 非 list,value=%r", messages)
             return ""
 
-        return _format_messages_to_readable(messages)
+        if not messages:
+            logger.info("_fetch_context: 拿到空列表(时间窗内可能没有消息)")
+            return ""
+
+        first = messages[0]
+        first_info = (
+            f"keys={sorted(first.keys())}" if isinstance(first, dict) else f"type={type(first).__name__}"
+        )
+        logger.info("_fetch_context: 拿到 %d 条消息,首条 %s", len(messages), first_info)
+
+        text = _format_messages_to_readable(messages)
+        preview = text[:200].replace("\n", "\\n") if text else ""
+        logger.info("_fetch_context: 拼出文本长度=%d preview=%r", len(text), preview)
+        return text
 
 
 def _format_messages_to_readable(messages: list) -> str:
