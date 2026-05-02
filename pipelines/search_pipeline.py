@@ -134,36 +134,37 @@ class SearchPipeline:
     # ------------------------------------------------------------------ #
 
     async def _fetch_context(self, chat_id: str) -> str:
+        """直接让 host 的 build_readable 在内部按 chat_id+时间窗拉消息。
+
+        **不要**先调 ``get_by_time_in_chat`` 再把结果传给 ``build_readable``——
+        host 的 ``_serialize_messages`` 把对象转成 dict/str,而
+        ``build_readable_messages`` 期望未序列化的消息对象(要 ``.processed_plain_text``
+        属性),会抛 ``'str' object has no attribute 'processed_plain_text'``。
+        改用 ``messages=None + chat_id + start_time + end_time`` 模式,host
+        内部 fetch + readable 一气呵成,绕开序列化。
+        """
+        if not chat_id:
+            return ""
+
         time_gap = self._models.context_time_gap
         max_limit = self._models.context_max_limit
         current_ts = time.time()
         start_ts = current_ts - time_gap
 
         try:
-            if chat_id:
-                # NOTE: SDK 类型注解写 str,实际 host 用 float() 强转,故传 number 即可
-                messages = await self._ctx.message.get_by_time_in_chat(
-                    chat_id=chat_id,
-                    start_time=start_ts,           # type: ignore[arg-type]
-                    end_time=current_ts,           # type: ignore[arg-type]
-                    limit=max_limit,
-                )
-            else:
-                messages = await self._ctx.message.get_by_time(
-                    start_time=start_ts,           # type: ignore[arg-type]
-                    end_time=current_ts,           # type: ignore[arg-type]
-                    limit=max_limit,
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("拉取聊天上下文失败: %s", exc)
-            return ""
-
-        if not messages:
-            return ""
-
-        try:
-            text = await self._ctx.message.build_readable(messages)
+            text = await self._ctx.message.build_readable(
+                None,  # messages=None → host 触发自取
+                chat_id=chat_id,
+                start_time=start_ts,           # type: ignore[arg-type]
+                end_time=current_ts,           # type: ignore[arg-type]
+                limit=max_limit,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("build_readable 失败: %s", exc)
             return ""
-        return str(text or "")
+
+        # 防御:host 失败时返回 {"success": False, "error": "..."} 而非 str
+        if not isinstance(text, str):
+            logger.warning("build_readable 返回非 str(可能 host 端报错): %r", type(text).__name__)
+            return ""
+        return text
