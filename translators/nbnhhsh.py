@@ -7,11 +7,11 @@ https://lab.magiconch.com/api/nbnhhsh/
 
 import aiohttp
 import asyncio
+import logging
 from typing import List, Dict, Any, Optional
-from src.common.logger import get_logger
 from .base import BaseTranslator, TranslationResult
 
-logger = get_logger("nbnhhsh_translator")
+logger = logging.getLogger(__name__)
 
 
 class NbnhhshTranslator(BaseTranslator):
