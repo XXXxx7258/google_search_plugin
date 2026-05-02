@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ._envelope import peel_envelope
+
 if TYPE_CHECKING:
     from maibot_sdk import PluginContext
 
@@ -60,6 +62,10 @@ class LLMRunner:
         except Exception as exc:
             logger.error("ctx.llm.generate 抛异常: %s", exc, exc_info=True)
             return ""
+
+        # SDK 2.4 / 新版 Runner 会多包一层 {"success": True, "result": {...}}
+        # 信封,SDK 的 _normalize_capability_result 没剥干净,这里手动剥。
+        result = peel_envelope(result)
 
         if not isinstance(result, dict):
             logger.warning("ctx.llm.generate 返回非 dict: type=%s value=%r", type(result).__name__, result)

@@ -10,6 +10,7 @@ import time
 from typing import TYPE_CHECKING, Optional
 
 from ..tools.rewrite_output import parse_rewrite_output
+from ._envelope import peel_envelope
 from .prompts import build_rewrite_prompt, build_summarize_prompt, format_results_for_prompt
 
 if TYPE_CHECKING:
@@ -180,8 +181,23 @@ class SearchPipeline:
             type(messages).__name__,
         )
 
+        # 防御性剥皮:SDK 2.4 / 新 Runner 双层 envelope
+        # {"success": True, "result": {"success": True, "messages": [...]}}
+        messages = peel_envelope(messages)
+        if isinstance(messages, dict):
+            # 剥完仍是 dict 时,从 messages 键提取 list
+            inner_list = messages.get("messages")
+            if isinstance(inner_list, list):
+                messages = inner_list
+            else:
+                logger.warning(
+                    "_fetch_context: peel 后仍是 dict 且无 'messages' 列表,keys=%s",
+                    sorted(messages.keys()),
+                )
+                return ""
+
         if not isinstance(messages, list):
-            logger.warning("_fetch_context: messages 非 list,value=%r", messages)
+            logger.warning("_fetch_context: messages 非 list,type=%s", type(messages).__name__)
             return ""
 
         if not messages:
