@@ -29,7 +29,7 @@ def _identity_header(bot_name: str) -> str:
 
 
 def build_rewrite_prompt(*, bot_name: str, question: str, context: str) -> str:
-    """构建查询重写 prompt(rewrite + 是否需要搜索 + tavily_topic 建议)"""
+    """构建查询重写 prompt(rewrite + 是否需要搜索判断)"""
     return textwrap.dedent(
         f"""
         {_identity_header(bot_name)}
@@ -47,16 +47,13 @@ def build_rewrite_prompt(*, bot_name: str, question: str, context: str) -> str:
         2.  如果当前提问已经足够清晰，直接使用它或稍作优化。
         3.  如果提问模糊（如使用了"它"、"那个"等代词），请从聊天记录中找出指代对象，并构成一个完整的查询。
         4.  如果分析后认为用户的问题不需要联网搜索就能回答（例如，只是简单的打招呼），请直接输出"无需搜索"。
-        5.  额外给出一个 `tavily_topic` 建议：
-            - 当问题强调"最新/近期/实时动态/新闻事件"时，优先输出 `news`。
-            - 当问题更偏向"通用知识/历史背景/教程/文档/概念解释"时，优先输出 `general`。
-            - 不确定时留空字符串（""）。
-        6.  输出的关键词应该简洁、明确，适合搜索引擎。
+        5.  输出的关键词应该简洁、明确，适合搜索引擎。
+        6.  保留中文人名/作品名/专有名词的中文形式，不要翻译成英文。
 
         [输出]
         - 如果无需搜索：请只输出 `无需搜索`。
         - 否则：请只输出 JSON（不要输出解释），格式如下：
-          {{"query": "<搜索关键词>", "tavily_topic": "news|general|"}}
+          {{"query": "<搜索关键词>"}}
         """
     ).strip()
 

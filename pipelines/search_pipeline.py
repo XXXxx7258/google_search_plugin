@@ -82,20 +82,22 @@ class SearchPipeline:
             logger.info("LLM 判断无需搜索")
             return rewrite_output
 
-        rewritten_query, model_tavily_topic = parse_rewrite_output(rewrite_output)
+        rewritten_query, _ = parse_rewrite_output(rewrite_output)
         if not rewritten_query:
             logger.info("LLM 未能生成有效搜索词,返回原始 rewrite 文本")
             return rewrite_output
 
-        logger.info("rewrite 后的搜索词: %s (model_tavily_topic=%s)", rewritten_query, model_tavily_topic)
+        logger.info("rewrite 后的搜索词: %s", rewritten_query)
 
         # ---- 3. 多引擎 fallback 搜索 ---- #
         max_results = self._backend.max_results
-        topic = tavily_topic_override or model_tavily_topic
+        # 只在调用方(web_search Tool 参数)显式指定时才用 tavily_topic;
+        # 不再让 rewrite LLM 建议 topic ——「最新赛况」之类的中文 query 命中
+        # tavily news 索引会被切换到只收英文体育的国际新闻库,反而劣化结果。
         results = await self._engines.search_with_fallback(
             rewritten_query,
             max_results,
-            tavily_topic=topic,
+            tavily_topic=tavily_topic_override,
         )
         if not results:
             return f"关于「{rewritten_query}」，我没有找到相关的网络信息。"
