@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "version": "3.2.0",
+  "version": "4.0.0",
   "name": "麦麦联网插件（search plugin）",
-  "description": "支持多个搜索引擎的网络搜索、缩写翻译以及图片搜索，并提供自动降级能力。",
+  "description": "支持多个搜索引擎的网络搜索、缩写翻译以及图片搜索，并提供自动降级能力。已迁移至新 SDK 2.3.0。",
   "author": {
     "name": "晴空",
     "url": "https://github.com/XXXxx7258"
@@ -19,14 +19,20 @@
     "max_version": "1.14.5"
   },
   "sdk": {
-    "min_version": "2.0.0",
+    "min_version": "2.3.0",
     "max_version": "2.99.99"
   },
   "dependencies": [],
   "capabilities": [
     "llm.generate",
+    "message.get_by_time_in_chat",
+    "message.build_readable",
+    "message.get_recent",
+    "database.query",
+    "config.get",
     "send.text",
-    "send.image"
+    "send.image",
+    "send.forward"
   ],
   "i18n": {
     "default_locale": "zh-CN",
