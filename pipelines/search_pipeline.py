@@ -134,14 +134,17 @@ class SearchPipeline:
     # ------------------------------------------------------------------ #
 
     async def _fetch_context(self, chat_id: str) -> str:
-        """直接让 host 的 build_readable 在内部按 chat_id+时间窗拉消息。
+        """拉聊天上下文并本地拼成可读文本。
 
-        **不要**先调 ``get_by_time_in_chat`` 再把结果传给 ``build_readable``——
-        host 的 ``_serialize_messages`` 把对象转成 dict/str,而
-        ``build_readable_messages`` 期望未序列化的消息对象(要 ``.processed_plain_text``
-        属性),会抛 ``'str' object has no attribute 'processed_plain_text'``。
-        改用 ``messages=None + chat_id + start_time + end_time`` 模式,host
-        内部 fetch + readable 一气呵成,绕开序列化。
+        **不走 ctx.message.build_readable**——host 那个 cap 在
+        ``_cap_message_build_readable`` 里调 ``message_service.build_readable_messages``
+        要求 SessionMessage 对象,但 ``_cap_message_get_by_time_in_chat`` 已经
+        把对象通过 ``_serialize_messages`` 序列化成 dict/str,两边对不上,
+        会抛 ``'str' object has no attribute 'processed_plain_text'``。
+
+        改成:get_by_time_in_chat 拿到 dict 列表,在插件侧自己拼。
+        host dict 里已经平铺了 ``processed_plain_text`` / ``display_message`` /
+        ``message_info.user_info.*`` 等必要字段,完全够用。
         """
         if not chat_id:
             return ""
@@ -152,19 +155,52 @@ class SearchPipeline:
         start_ts = current_ts - time_gap
 
         try:
-            text = await self._ctx.message.build_readable(
-                None,  # messages=None → host 触发自取
+            # SDK 类型注解写 str,实际 host 用 float() 强转,故传 number 即可
+            messages = await self._ctx.message.get_by_time_in_chat(
                 chat_id=chat_id,
                 start_time=start_ts,           # type: ignore[arg-type]
                 end_time=current_ts,           # type: ignore[arg-type]
                 limit=max_limit,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("build_readable 失败: %s", exc)
+            logger.warning("get_by_time_in_chat 失败: %s", exc)
             return ""
 
-        # 防御:host 失败时返回 {"success": False, "error": "..."} 而非 str
-        if not isinstance(text, str):
-            logger.warning("build_readable 返回非 str(可能 host 端报错): %r", type(text).__name__)
+        if not isinstance(messages, list) or not messages:
             return ""
-        return text
+
+        return _format_messages_to_readable(messages)
+
+
+def _format_messages_to_readable(messages: list) -> str:
+    """把 host 序列化过的 message dict 列表拼成 ``[HH:MM:SS] 名字: 文本`` 形式。
+
+    防御性处理:跳过结构不全的项(非 dict / 缺 user / 缺文本)。
+
+    Args:
+        messages: ``ctx.message.get_by_time_in_chat`` 返回的 dict 列表
+    """
+    lines: list[str] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        user_info = (msg.get("message_info") or {}).get("user_info") or {}
+        user_name = (
+            user_info.get("user_cardname")
+            or user_info.get("user_nickname")
+            or user_info.get("user_id")
+            or "未知"
+        )
+        text = msg.get("processed_plain_text") or msg.get("display_message") or ""
+        if not text:
+            continue
+        ts_prefix = ""
+        ts_raw = msg.get("timestamp")
+        if ts_raw is not None:
+            try:
+                ts_float = float(ts_raw)
+                ts_prefix = "[" + time.strftime("%H:%M:%S", time.localtime(ts_float)) + "] "
+            except (ValueError, TypeError):
+                ts_prefix = ""
+        lines.append(f"{ts_prefix}{user_name}: {text}")
+    return "\n".join(lines)
