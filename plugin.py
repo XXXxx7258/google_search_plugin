@@ -1,12 +1,13 @@
-"""google_search_plugin — 新 SDK 版本主入口 (4.0.0 重写)
-
-阶段 4 完成:三大组件全部接入。
-
-- ``@Tool("web_search")``        主搜索工具 → SearchPipeline / UrlPipeline
-- ``@Tool("abbreviation_translate")`` 缩写翻译 → NbnhhshTranslator
-- ``@Action("image_search")``    图片搜索 → ImageSearchPipeline (条件由 handler 内短路)
+"""google_search_plugin 主入口
 
 业务逻辑全部抽到 ``pipelines/`` 子模块,本文件只负责装配 + 派发。
+
+提供三个面向 LLM 的组件:
+- ``@Tool("web_search")``             主搜索工具(支持 URL 直访)
+- ``@Tool("abbreviation_translate")`` 缩写翻译(神奇海螺 nbnhhsh)
+- ``@Action("image_search")``         图片搜索(handler 内按配置短路)
+
+外加一个 ``/google_search_status`` 诊断命令。
 """
 
 from __future__ import annotations
@@ -28,13 +29,9 @@ from .pipelines.url_pipeline import UrlPipeline, is_url
 from .pipelines.zhihu_extractor import ZhihuExtractor
 from .translators.nbnhhsh import NbnhhshTranslator
 
-_LEGACY_VERSION_HINT = (
-    "如需 v3.x 旧版,可在本插件仓库 checkout tag v3.2.0-legacy 获取。"
-)
-
 
 class GoogleSearchPlugin(MaiBotPlugin):
-    """麦麦联网插件主类 (新 SDK 版)"""
+    """麦麦联网插件主类"""
 
     config_model = GoogleSearchPluginConfig
 
@@ -391,7 +388,7 @@ class GoogleSearchPlugin(MaiBotPlugin):
         return False, "所有图片下载失败"
 
     # ---------------------------------------------------------------- #
-    # 临时诊断命令(阶段 5 可删)
+    # 诊断命令
     # ---------------------------------------------------------------- #
 
     @Command(
@@ -439,15 +436,13 @@ class GoogleSearchPlugin(MaiBotPlugin):
         )
 
         lines = [
-            f"google_search_plugin v{cfg.plugin.version} (新 SDK 重写)",
+            f"google_search_plugin v{cfg.plugin.version}",
             f"模型 task: {cfg.models.model_name}  温度: {cfg.models.temperature}",
             f"默认引擎: {cfg.search_backend.default_engine}",
             f"启用引擎: {', '.join(enabled_engines) if enabled_engines else '(无)'}",
             f"图片搜索: {'已启用' if cfg.actions.image_search_enabled else '未启用'}",
             f"缩写翻译: {'已启用' if cfg.translation.enabled else '未启用'}",
             f"组件就绪: {'是' if ready else '否'}",
-            "",
-            _LEGACY_VERSION_HINT,
         ]
         message = "\n".join(lines)
 

@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "version": "4.0.0",
   "name": "麦麦联网插件（search plugin）",
-  "description": "支持多个搜索引擎的网络搜索、缩写翻译以及图片搜索，并提供自动降级能力。已迁移至新 SDK 2.3.0。",
+  "description": "支持多个搜索引擎的网络搜索、缩写翻译以及图片搜索，并提供自动降级能力。",
   "author": {
     "name": "晴空",
     "url": "https://github.com/XXXxx7258"
