@@ -170,14 +170,9 @@ class EngineChain:
         else:
             ordered = all_engines
 
-        # 各引擎默认开关(没有显式配置时)
-        defaults = {"google": False, "tavily": False, "you": False, "you_news": False}
-
         for engine_name, engine in ordered:
-            is_enabled = getattr(engines_cfg, f"{engine_name}_enabled", None)
-            if is_enabled is None:
-                is_enabled = defaults.get(engine_name, True)
-            if not is_enabled:
+            # engines_cfg 是 Pydantic 模型,*_enabled 字段强制为 bool,直接读即可
+            if not getattr(engines_cfg, f"{engine_name}_enabled", False):
                 logger.info("引擎 %s 已禁用,跳过", engine_name)
                 continue
 
