@@ -1,8 +1,5 @@
 """多引擎搜索 fallback 链。
 
-从老 plugin.py 的 ``_initialize_engines`` / ``_build_engine_config`` /
-``_search_with_fallback`` 抽出。
-
 EngineChain 持有所有引擎实例 + 当次搜索的状态(last_success_engine /
 last_tavily_answer)。SearchPipeline 通过它发起搜索。
 """

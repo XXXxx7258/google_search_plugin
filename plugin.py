@@ -322,7 +322,7 @@ class GoogleSearchPlugin(MaiBotPlugin):
         stream_id: str = "",
         **kwargs: Any,
     ) -> tuple[bool, str]:
-        """图片搜索入口(决策 2A:handler 内短路而非条件注册)。"""
+        """图片搜索入口。未启用时不做条件注册,而是 handler 内短路。"""
         del kwargs
 
         if not self.config.actions.image_search_enabled:

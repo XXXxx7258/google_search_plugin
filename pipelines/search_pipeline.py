@@ -1,9 +1,7 @@
 """主搜索流程:rewrite → engines → fetch → summarize。
 
-从老 plugin.py 的 ``_execute_model_driven_search`` 抽出。
-
-注:工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表
-(``database_api.store_tool_info``),插件不再自己写 ChatHistory。
+工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表,
+插件本身不写库。
 """
 
 from __future__ import annotations

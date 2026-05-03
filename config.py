@@ -1,7 +1,7 @@
-"""google_search_plugin 配置模型 (新 SDK 版)
+"""google_search_plugin 配置模型。
 
-按 PluginConfigBase 拆分为多个 section,字段集与 v3.x 的 config_schema 一一对应。
-注意 [model_config] section 已重命名为 [models](Pydantic v2 保留 model_config 这个名字)。
+按 PluginConfigBase 拆分为多个 section。注意 ``[models]`` section 不能叫
+``model_config``——Pydantic v2 把这个名字保留给 BaseModel 的元数据属性。
 """
 
 from typing import Literal
@@ -27,11 +27,10 @@ class PluginSection(PluginConfigBase):
 
 
 class ModelsSection(PluginConfigBase):
-    """搜索/总结使用的 LLM 任务参数
+    """搜索/总结使用的 LLM 任务参数。
 
-    注意:section 名为 ``models``,不是 ``model_config``——Pydantic v2 保留了
-    ``model_config`` 作为模型元数据属性名,这里必须改名。v3.x 用户升级后需要
-    把旧 toml 中的 ``[model_config]`` section 改成 ``[models]``。
+    section 名为 ``models`` 而非 ``model_config``——后者被 Pydantic v2 保留为
+    BaseModel 的元数据属性,不能用作字段名。
     """
 
     __ui_label__ = "模型"

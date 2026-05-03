@@ -1,9 +1,7 @@
 """URL 直访总结流程。
 
-从老 plugin.py 的 ``_execute_direct_url_summary`` / ``_is_url`` 抽出。
-
-注:工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表,
-插件不再自己写 ChatHistory。
+工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表,
+插件本身不写库。
 """
 
 from __future__ import annotations

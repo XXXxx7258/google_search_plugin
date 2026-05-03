@@ -1,8 +1,5 @@
 """知乎专用抓取与 initialState 解析。
 
-从老 plugin.py 的 ``_fetch_zhihu_content`` / ``_build_zhihu_request_profiles`` /
-``_request_zhihu_page`` / ``_extract_zhihu_*`` 系列抽出。
-
 设计原则:这是一个独立的"零 src 依赖"模块,只用 curl_cffi + bs4 + stdlib。
 """
 

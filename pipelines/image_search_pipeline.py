@@ -1,7 +1,5 @@
 """图片搜索流水线。
 
-从老 plugin.py 的 ``ImageSearchAction`` 抽出。
-
 职责:
 - 维护 4 个图片搜索引擎(Bing / Sogou / DuckDuckGo / YouImages)
 - 30 分钟内同 query 不重复发送同一张图片(dedup 缓存)

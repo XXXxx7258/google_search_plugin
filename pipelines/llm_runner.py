@@ -1,11 +1,9 @@
 """LLM 调用包装。
 
-从老 plugin.py 的 ``_call_llm`` 抽出,改用新 SDK 的 ``ctx.llm.generate``。
-
-**核心设计**:
+设计要点:
 - 必须显式传 ``model=`` 参数,否则 host 端 ``resolve_task_name("")``
-  会按字母序回退到 ``embedding`` task,导致 400 错误(诊断报告 Bug C)。
-- 区分"调用失败"(异常/success=False/超时)与"模型返空响应"两种 case:
+  会按字母序回退到 ``embedding`` task,导致 chat completion 失败。
+- 区分"调用失败"(异常 / success=False / 超时)与"模型返空响应":
   前者抛 :class:`LLMCallError`,调用方据此给出"服务暂不可用"文案;
   后者返回空字符串,调用方给出"无法确定"文案。
 """
@@ -74,7 +72,7 @@ class LLMRunner:
             result = await asyncio.wait_for(
                 self._ctx.llm.generate(
                     prompt=prompt,
-                    model=target_model,            # ← 必须显式传,否则落到 embedding
+                    model=target_model,            # 必须显式传,空字符串会被 host 回退到 embedding
                     temperature=temperature,
                 ),
                 timeout=timeout,
