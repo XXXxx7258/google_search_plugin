@@ -41,15 +41,14 @@ class ModelsSection(PluginConfigBase):
     model_name: Literal[
         "replyer",
         "utils",
-        "tool_use",
         "planner",
         "vlm",
-        "lpmm_entity_extract",
-        "lpmm_rdf_build",
-        "lpmm_qa",
     ] = Field(
         default="replyer",
-        description="指定用于搜索和总结的系统模型 task。默认 'replyer' 即系统主回复模型。",
+        description=(
+            "指定用于搜索和总结的系统模型 task。可选值与 host model_configs.py "
+            "里的 chat 类 task 对齐(replyer/utils/planner/vlm),默认 'replyer'。"
+        ),
     )
     temperature: float = Field(default=0.7, description="模型生成温度")
     context_time_gap: int = Field(default=300, description="拉取最近多少秒的全局聊天作为上下文")
@@ -150,7 +149,11 @@ class EnginesSection(PluginConfigBase):
     tavily_include_answer: bool = Field(default=True, description="是否返回 Tavily 生成的答案")
     tavily_topic: str = Field(
         default="",
-        description="可选的主题参数,例如 'general' 或 'news';留空则由模型自动判断",
+        description=(
+            "Tavily topic 参数(general/news);留空表示不传 topic,Tavily 走 general 模式。"
+            "中文电竞/娱乐/社交场景**不建议**指定 news ——Tavily 的 news 索引偏向英文国际"
+            "体育/政治资讯,中文检索准确率会显著下降。"
+        ),
     )
     tavily_turbo: bool = Field(default=False, description="是否启用 Tavily Turbo 模式")
 

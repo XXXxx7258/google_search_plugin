@@ -178,7 +178,10 @@ class GoogleSearchPlugin(MaiBotPlugin):
             ToolParameterInfo(
                 name="tavily_topic",
                 param_type=ToolParamType.STRING,
-                description="可选：Tavily topic 覆写（general/news）；留空则由模型自动判断。",
+                description=(
+                    "可选:Tavily topic 覆写(general/news);留空表示不传 topic。"
+                    "中文场景不建议指定 news,Tavily news 索引偏向英文体育/政治新闻。"
+                ),
                 required=False,
             ),
         ],
