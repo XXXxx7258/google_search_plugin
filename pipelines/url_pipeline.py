@@ -77,4 +77,6 @@ class UrlPipeline:
             return await self._llm.generate(prompt)
         except LLMCallError as exc:
             logger.warning("url summarize LLM 调用失败: %s", exc)
-            return f"已抓取网页内容,但总结时遇到问题:\n\n{content[:500]}..."
+            # 不回显抓取到的原始页面内容(可能含 PII / 边栏 / 跟踪数据等
+            # 经 trafilatura 清洗后仍会漏的非主体文字)
+            return "已抓取该网页,但总结服务暂时不可用,请稍后再试。"
