@@ -127,8 +127,14 @@ class SearchPipeline:
             final_answer = await self._llm.generate(summarize_prompt)
         except LLMCallError as exc:
             logger.warning("summarize LLM 调用失败: %s", exc)
-            # 已经拿到搜索结果,但总结失败 —— 返回原始结果格式,而不是丢弃
-            return f"找到了一些资料,但整理时遇到问题:\n\n{formatted}"
+            # 不回显抓取到的 abstract(可能含 PII / 边栏文字),只列搜索引擎元数据
+            # (title + url 是公开的搜索结果索引信息,泄漏风险低)
+            links = "\n".join(
+                f"- {r.title}: {r.url}" for r in results if r.title and r.url
+            )
+            if links:
+                return f"已找到相关结果,但总结服务暂时不可用,可手动查看:\n\n{links}"
+            return "搜索服务暂时不可用,请稍后再试。"
 
         return final_answer
 
