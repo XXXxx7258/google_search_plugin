@@ -16,9 +16,6 @@ from __future__ import annotations
 
 from typing import Any
 
-# 一个 envelope 层的判定:dict 同时拥有 success + result
-_ENVELOPE_KEYS = frozenset({"success", "result"})
-
 
 def peel_envelope(result: Any, *, max_depth: int = 4) -> Any:
     """递归脱掉 ``{"success": ..., "result": <inner>}`` 信封。

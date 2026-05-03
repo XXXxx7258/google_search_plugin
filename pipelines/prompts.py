@@ -1,8 +1,5 @@
 """LLM 提示模板。
 
-从老 plugin.py 的 ``_build_rewrite_prompt`` / ``_build_summarize_prompt`` /
-``_build_url_summarize_prompt`` / ``_identity_header`` 抽出。
-
 设计原则:这些是**纯函数**,bot_name / 时间等动态信息由调用方(SearchPipeline)
 提前 resolve 后传入,prompts 模块本身不依赖 ctx。
 """

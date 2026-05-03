@@ -1,7 +1,5 @@
 """图片搜索流水线。
 
-从老 plugin.py 的 ``ImageSearchAction`` 抽出。
-
 职责:
 - 维护 4 个图片搜索引擎(Bing / Sogou / DuckDuckGo / YouImages)
 - 30 分钟内同 query 不重复发送同一张图片(dedup 缓存)
@@ -55,11 +53,35 @@ class ImageSearchPipeline:
 
         # 30 分钟去重:每个 query 一个 deque,(url, ts)
         self._image_history: dict[str, deque[tuple[str, float]]] = {}
-        # 缓存大小:max_results × 3 但下限 30
+        # 单 query 缓存大小:max_results × 3 但下限 30
         max_results = max(self._backend_cfg.max_results or 0, 0)
         self._image_history_max_size: int = max(30, max_results * 3) if max_results > 0 else 30
         self._image_repeat_window_seconds: int = 30 * 60
+        # 顶层 query 数量上限,防止长期运行下 dict 单调增长(每次清理过期 query 时检查)
+        self._max_distinct_queries: int = 200
         self.last_engine: Optional[str] = None
+
+    def _evict_stale_queries(self, now: float) -> None:
+        """清理 30 分钟内零活跃的 query 条目。
+
+        每条 query 的 deque 内是 (url, ts);ts 都早于窗口 → 整条 query 可丢。
+        """
+        window = self._image_repeat_window_seconds
+        stale = [
+            q
+            for q, hist in self._image_history.items()
+            if not hist or now - hist[-1][1] > window
+        ]
+        for q in stale:
+            self._image_history.pop(q, None)
+        # 顶层兜底:即使没全部过期,如果 query 数超阈值,按最旧 ts 淘汰至阈值
+        if len(self._image_history) > self._max_distinct_queries:
+            sorted_by_age = sorted(
+                self._image_history.items(),
+                key=lambda kv: kv[1][-1][1] if kv[1] else 0.0,
+            )
+            for q, _ in sorted_by_age[: -self._max_distinct_queries]:
+                self._image_history.pop(q, None)
 
     async def find_unique_image_b64(
         self,
@@ -97,6 +119,8 @@ class ImageSearchPipeline:
 
         history = self._image_history.get(query)
         if history is None:
+            # 新 query 接入前先清理过期条目,避免长期运行下 dict 单调增长
+            self._evict_stale_queries(time.time())
             history = deque(maxlen=self._image_history_max_size)
             self._image_history[query] = history
 

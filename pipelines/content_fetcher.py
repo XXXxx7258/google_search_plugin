@@ -1,7 +1,6 @@
 """网页正文抓取(普通页 trafilatura/readability/bs4 三级降级)。
 
-从老 plugin.py 的 ``_fetch_page_content`` / ``_fetch_content_for_results`` /
-``_integrate_inline_content`` 抽出。知乎专用走 ``ZhihuExtractor``。
+知乎专用走 ``ZhihuExtractor``。
 """
 
 from __future__ import annotations

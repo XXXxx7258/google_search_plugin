@@ -1,9 +1,7 @@
 """URL 直访总结流程。
 
-从老 plugin.py 的 ``_execute_direct_url_summary`` / ``_is_url`` 抽出。
-
-注:工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表,
-插件不再自己写 ChatHistory。
+工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表,
+插件本身不写库。
 """
 
 from __future__ import annotations
@@ -14,6 +12,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from .llm_runner import LLMCallError
 from .prompts import build_url_summarize_prompt
 
 if TYPE_CHECKING:
@@ -72,4 +71,10 @@ class UrlPipeline:
         logger.info("成功抓取网页内容,长度=%d", len(content))
         prompt = build_url_summarize_prompt(bot_name=bot_name, url=url, content=content)
         logger.info("调用 LLM 对网页内容进行总结")
-        return await self._llm.generate(prompt)
+        try:
+            return await self._llm.generate(prompt)
+        except LLMCallError as exc:
+            logger.warning("url summarize LLM 调用失败: %s", exc)
+            # 不回显抓取到的原始页面内容(可能含 PII / 边栏 / 跟踪数据等
+            # 经 trafilatura 清洗后仍会漏的非主体文字)
+            return "已抓取该网页,但总结服务暂时不可用,请稍后再试。"

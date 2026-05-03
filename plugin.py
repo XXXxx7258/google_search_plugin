@@ -132,11 +132,11 @@ class GoogleSearchPlugin(MaiBotPlugin):
     async def _resolve_bot_name(self) -> str:
         """从全局 bot 配置取昵称(失败时兜底 '机器人')。"""
         try:
-            value = await self.ctx.config.get("bot.nickname", "机器人")
+            value = await self.ctx.config.get("bot.nickname", "")
         except Exception as exc:  # noqa: BLE001
             self.ctx.logger.debug("config.get bot.nickname 失败: %s", exc)
-            return "机器人"
-        return str(value or "机器人") or "机器人"
+            value = ""
+        return str(value).strip() or "机器人"
 
     def _ensure_pipelines_ready(self) -> bool:
         """确保 pipelines 已装配;未装配则尝试重建。"""
@@ -178,7 +178,10 @@ class GoogleSearchPlugin(MaiBotPlugin):
             ToolParameterInfo(
                 name="tavily_topic",
                 param_type=ToolParamType.STRING,
-                description="可选：Tavily topic 覆写（general/news）；留空则由模型自动判断。",
+                description=(
+                    "可选:Tavily topic 覆写(general/news);留空表示不传 topic。"
+                    "中文场景不建议指定 news,Tavily news 索引偏向英文体育/政治新闻。"
+                ),
                 required=False,
             ),
         ],
@@ -319,7 +322,7 @@ class GoogleSearchPlugin(MaiBotPlugin):
         stream_id: str = "",
         **kwargs: Any,
     ) -> tuple[bool, str]:
-        """图片搜索入口(决策 2A:handler 内短路而非条件注册)。"""
+        """图片搜索入口。未启用时不做条件注册,而是 handler 内短路。"""
         del kwargs
 
         if not self.config.actions.image_search_enabled:
@@ -386,7 +389,7 @@ class GoogleSearchPlugin(MaiBotPlugin):
     @Command(
         "google_search_status",
         description="查询 google_search_plugin 当前加载状态与关键配置",
-        pattern=r"^/google_search_status$",
+        pattern=r"^/google_search_status\s*$",
     )
     async def handle_status(
         self,

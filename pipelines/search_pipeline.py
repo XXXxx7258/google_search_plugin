@@ -1,9 +1,7 @@
 """主搜索流程:rewrite → engines → fetch → summarize。
 
-从老 plugin.py 的 ``_execute_model_driven_search`` 抽出。
-
-注:工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表
-(``database_api.store_tool_info``),插件不再自己写 ChatHistory。
+工具调用结果由 host 的 maisaka.reasoning_engine 自动写入 ``tool_records`` 表,
+插件本身不写库。
 """
 
 from __future__ import annotations
@@ -14,6 +12,7 @@ from typing import TYPE_CHECKING, Optional
 
 from ..tools.rewrite_output import parse_rewrite_output
 from ._envelope import peel_envelope
+from .llm_runner import LLMCallError
 from .prompts import build_rewrite_prompt, build_summarize_prompt, format_results_for_prompt
 
 if TYPE_CHECKING:
@@ -72,10 +71,14 @@ class SearchPipeline:
         # ---- 2. rewrite prompt ---- #
         rewrite_prompt = build_rewrite_prompt(bot_name=bot_name, question=question, context=context_str)
         logger.info("调用 LLM 进行查询重写")
-        rewrite_output = (await self._llm.generate(rewrite_prompt) or "").strip()
+        try:
+            rewrite_output = (await self._llm.generate(rewrite_prompt) or "").strip()
+        except LLMCallError as exc:
+            logger.warning("rewrite LLM 调用失败: %s", exc)
+            return "搜索服务暂时不可用,请稍后再试。"
 
         if not rewrite_output:
-            logger.info("LLM 未返回查询重写结果")
+            logger.info("LLM 未返回查询重写结果(模型自然返空)")
             return "根据上下文分析，我无法确定需要搜索的具体内容。"
 
         if "无需搜索" in rewrite_output:
@@ -118,7 +121,18 @@ class SearchPipeline:
             formatted_results=formatted,
         )
         logger.info("调用 LLM 对搜索结果进行总结")
-        final_answer = await self._llm.generate(summarize_prompt)
+        try:
+            final_answer = await self._llm.generate(summarize_prompt)
+        except LLMCallError as exc:
+            logger.warning("summarize LLM 调用失败: %s", exc)
+            # 不回显抓取到的 abstract(可能含 PII / 边栏文字),只列搜索引擎元数据
+            # (title + url 是公开的搜索结果索引信息,泄漏风险低)
+            links = "\n".join(
+                f"- {r.title}: {r.url}" for r in results if r.title and r.url
+            )
+            if links:
+                return f"已找到相关结果,但总结服务暂时不可用,可手动查看:\n\n{links}"
+            return "搜索服务暂时不可用,请稍后再试。"
 
         return final_answer
 
