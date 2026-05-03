@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from .llm_runner import LLMCallError
 from .prompts import build_url_summarize_prompt
 
 if TYPE_CHECKING:
@@ -72,4 +73,8 @@ class UrlPipeline:
         logger.info("成功抓取网页内容,长度=%d", len(content))
         prompt = build_url_summarize_prompt(bot_name=bot_name, url=url, content=content)
         logger.info("调用 LLM 对网页内容进行总结")
-        return await self._llm.generate(prompt)
+        try:
+            return await self._llm.generate(prompt)
+        except LLMCallError as exc:
+            logger.warning("url summarize LLM 调用失败: %s", exc)
+            return f"已抓取网页内容,但总结时遇到问题:\n\n{content[:500]}..."

@@ -132,11 +132,11 @@ class GoogleSearchPlugin(MaiBotPlugin):
     async def _resolve_bot_name(self) -> str:
         """从全局 bot 配置取昵称(失败时兜底 '机器人')。"""
         try:
-            value = await self.ctx.config.get("bot.nickname", "机器人")
+            value = await self.ctx.config.get("bot.nickname", "")
         except Exception as exc:  # noqa: BLE001
             self.ctx.logger.debug("config.get bot.nickname 失败: %s", exc)
-            return "机器人"
-        return str(value or "机器人") or "机器人"
+            value = ""
+        return str(value).strip() or "机器人"
 
     def _ensure_pipelines_ready(self) -> bool:
         """确保 pipelines 已装配;未装配则尝试重建。"""
@@ -389,7 +389,7 @@ class GoogleSearchPlugin(MaiBotPlugin):
     @Command(
         "google_search_status",
         description="查询 google_search_plugin 当前加载状态与关键配置",
-        pattern=r"^/google_search_status$",
+        pattern=r"^/google_search_status\s*$",
     )
     async def handle_status(
         self,

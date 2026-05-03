@@ -53,6 +53,10 @@ class ModelsSection(PluginConfigBase):
     temperature: float = Field(default=0.7, description="模型生成温度")
     context_time_gap: int = Field(default=300, description="拉取最近多少秒的全局聊天作为上下文")
     context_max_limit: int = Field(default=15, description="最多拉取多少条全局聊天作为上下文")
+    llm_timeout_seconds: int = Field(
+        default=60,
+        description="单次 LLM 调用超时(秒);避免模型卡住时整个搜索 Tool 阻塞",
+    )
 
 
 class ActionsSection(PluginConfigBase):

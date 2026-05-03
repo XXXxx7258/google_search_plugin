@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Optional
 
 from ..tools.rewrite_output import parse_rewrite_output
 from ._envelope import peel_envelope
+from .llm_runner import LLMCallError
 from .prompts import build_rewrite_prompt, build_summarize_prompt, format_results_for_prompt
 
 if TYPE_CHECKING:
@@ -72,10 +73,14 @@ class SearchPipeline:
         # ---- 2. rewrite prompt ---- #
         rewrite_prompt = build_rewrite_prompt(bot_name=bot_name, question=question, context=context_str)
         logger.info("调用 LLM 进行查询重写")
-        rewrite_output = (await self._llm.generate(rewrite_prompt) or "").strip()
+        try:
+            rewrite_output = (await self._llm.generate(rewrite_prompt) or "").strip()
+        except LLMCallError as exc:
+            logger.warning("rewrite LLM 调用失败: %s", exc)
+            return "搜索服务暂时不可用,请稍后再试。"
 
         if not rewrite_output:
-            logger.info("LLM 未返回查询重写结果")
+            logger.info("LLM 未返回查询重写结果(模型自然返空)")
             return "根据上下文分析，我无法确定需要搜索的具体内容。"
 
         if "无需搜索" in rewrite_output:
@@ -118,7 +123,12 @@ class SearchPipeline:
             formatted_results=formatted,
         )
         logger.info("调用 LLM 对搜索结果进行总结")
-        final_answer = await self._llm.generate(summarize_prompt)
+        try:
+            final_answer = await self._llm.generate(summarize_prompt)
+        except LLMCallError as exc:
+            logger.warning("summarize LLM 调用失败: %s", exc)
+            # 已经拿到搜索结果,但总结失败 —— 返回原始结果格式,而不是丢弃
+            return f"找到了一些资料,但整理时遇到问题:\n\n{formatted}"
 
         return final_answer
 
