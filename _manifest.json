@@ -76,12 +76,12 @@
     {
       "type": "python_package",
       "name": "brotli",
-      "version_spec": ""
+      "version_spec": ">=1.0.0"
     },
     {
       "type": "python_package",
       "name": "ddgs",
-      "version_spec": ""
+      "version_spec": ">=9.0.0"
     },
     {
       "type": "python_package",
