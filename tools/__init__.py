@@ -1,9 +1,4 @@
+"""tools 子包
+
+只暴露 ``rewrite_output`` 这个纯解析模块。按需 ``from .rewrite_output import X`` 直接导入即可。
 """
-工具模块
-
-提供各种功能工具的实现
-"""
-
-from .abbreviation_tool import AbbreviationTool
-
-__all__ = ['AbbreviationTool']
