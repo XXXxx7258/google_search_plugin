@@ -22,7 +22,73 @@
     "min_version": "2.3.0",
     "max_version": "2.99.99"
   },
-  "dependencies": [],
+  "dependencies": [
+    {
+      "type": "python_package",
+      "name": "mi-googlesearch-python",
+      "version_spec": ">=1.3.0"
+    },
+    {
+      "type": "python_package",
+      "name": "aiohttp",
+      "version_spec": ">=3.8.0"
+    },
+    {
+      "type": "python_package",
+      "name": "beautifulsoup4",
+      "version_spec": ">=4.11.0"
+    },
+    {
+      "type": "python_package",
+      "name": "curl_cffi",
+      "version_spec": ">=0.7.0"
+    },
+    {
+      "type": "python_package",
+      "name": "lxml",
+      "version_spec": ">=4.9.0"
+    },
+    {
+      "type": "python_package",
+      "name": "readability-lxml",
+      "version_spec": ">=0.8.1"
+    },
+    {
+      "type": "python_package",
+      "name": "trafilatura",
+      "version_spec": ">=1.6.0"
+    },
+    {
+      "type": "python_package",
+      "name": "charset-normalizer",
+      "version_spec": ">=3.0.0"
+    },
+    {
+      "type": "python_package",
+      "name": "lxml-html-clean",
+      "version_spec": ">=0.1.0"
+    },
+    {
+      "type": "python_package",
+      "name": "aiohttp-socks",
+      "version_spec": ">=0.8.0"
+    },
+    {
+      "type": "python_package",
+      "name": "brotli",
+      "version_spec": ""
+    },
+    {
+      "type": "python_package",
+      "name": "ddgs",
+      "version_spec": ""
+    },
+    {
+      "type": "python_package",
+      "name": "httpx",
+      "version_spec": ">=0.25.0"
+    }
+  ],
   "capabilities": [
     "llm.generate",
     "message.get_by_time_in_chat",
