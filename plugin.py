@@ -194,6 +194,13 @@ class GoogleSearchPlugin(MaiBotPlugin):
         **kwargs: Any,
     ) -> dict[str, str]:
         """主搜索入口。"""
+        # 兼容模型常用的 query 参数名（OpenAI/Grok/Tavily 等通用约定）
+        if not (question or "").strip():
+            for alias in ("query", "q", "search_query", "keyword"):
+                value = kwargs.get(alias)
+                if isinstance(value, str) and value.strip():
+                    question = value
+                    break
         del kwargs
 
         question = (question or "").strip()
