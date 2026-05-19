@@ -1,11 +1,14 @@
 import json
 import logging
+import random
 import re
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode, urlparse
+
+import aiohttp
 from bs4 import BeautifulSoup
 
-from .base import BaseSearchEngine, SearchResult
+from .base import BaseSearchEngine, SearchResult, USER_AGENTS
 
 logger = logging.getLogger(__name__)
 
@@ -179,16 +182,38 @@ class BingEngine(BaseSearchEngine):
 
         if mkt and "-" in mkt:
             lang = mkt.split("-")[0]
-            self.headers["Accept-Language"] = f"{mkt},{lang};q=0.9"
+            accept_language: Optional[str] = f"{mkt},{lang};q=0.9"
         elif mkt:
-            self.headers["Accept-Language"] = f"{mkt};q=0.9"
+            accept_language = f"{mkt};q=0.9"
         else:
-            self.headers.pop("Accept-Language", None)
+            accept_language = None
 
         query_string = urlencode(params)
         search_url = f"{base_url}/search?{query_string}"
         logger.info(f"Requesting Bing search URL: {search_url}")
-        return await self._get_html(search_url)
+        return await self._fetch(search_url, accept_language=accept_language)
+
+    async def _fetch(self, url: str, *, accept_language: Optional[str] = None) -> str:
+        """Per-request 抓取,不污染 self.headers,避免并发下 Accept-Language 跨请求泄漏。
+
+        与 base._get_html 行为等价,但 headers 用本地 dict 而非共享实例属性。
+        """
+        headers = dict(self.headers)
+        headers["Referer"] = url
+        headers["User-Agent"] = random.choice(USER_AGENTS)
+        if accept_language:
+            headers["Accept-Language"] = accept_language
+        else:
+            headers.pop("Accept-Language", None)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
+                proxy=self.proxy,
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.text()
 
     def _get_link_elements(self, soup: BeautifulSoup) -> List[Any]:
         """获取搜索结果节点，包含主选择器和回退。"""
@@ -253,7 +278,8 @@ class BingEngine(BaseSearchEngine):
             keywords = self._build_keywords(query)
             is_english = bool(_ENGLISH_ONLY_RE.fullmatch(query.lower().strip()))
             # 中文 query: cn 优先(中国大陆 IP 最优),www 兜底(海外 IP 时 cn 空骨架自动 fall through)
-            # 英文 query: 只走 www 不传 mkt(cn 对英文 query 偏返中文翻译/字典页)
+            # 英文 query: 只走 www 不传 mkt(cn 对英文 query 偏返中文翻译/字典页;
+            #            zh_fallback 带 mkt 会触发 Bing 短词命名实体模式,故不作为英文 fallback)
             zh_variant = {
                 "base_url": "https://cn.bing.com",
                 "region": self.region,
@@ -272,7 +298,7 @@ class BingEngine(BaseSearchEngine):
                 "setlang": "en",
                 "market": "",
             }
-            fetch_variants = [en_variant, zh_fallback] if is_english else [zh_variant, zh_fallback, en_variant]
+            fetch_variants = [en_variant] if is_english else [zh_variant, zh_fallback, en_variant]
 
             results: List[SearchResult] = []
             for variant in fetch_variants:
