@@ -35,8 +35,6 @@ class BingEngine(BaseSearchEngine):
 
     base_urls: List[str]
     region: str
-    setlang: str
-    count: int
 
     SELECTOR_CONFIG: Dict[str, Dict[str, Any]] = {
         "url": {
