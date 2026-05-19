@@ -27,7 +27,7 @@ _STOPWORDS_ZH = frozenset({
     "应该", "可以", "能否", "哪个", "哪些", "哪里", "这个", "那个",
 })
 
-_ENGLISH_ONLY_RE = re.compile(r"^[a-z0-9\s\.\?\!,\-\:\;'\"\(\)]+$")
+_ENGLISH_ONLY_RE = re.compile(r"^[a-z0-9\s\.\?\!,\-\:\;'\"\(\)\+#]+$")
 
 
 class BingEngine(BaseSearchEngine):
@@ -92,15 +92,13 @@ class BingEngine(BaseSearchEngine):
         # cn 优先(多数中国大陆用户场景下中文索引最优), www 兜底(海外 IP 时 cn 给空骨架)。
         self.base_urls = ["https://cn.bing.com", "https://www.bing.com"]
         self.region = self.config.get("region", "zh-CN")
-        self.setlang = self.config.get("setlang", "zh")
-        self.count = self.config.get("count", 10)
 
     def _build_keywords(self, query: str) -> List[str]:
         """构建用于相关性过滤的关键词列表,兼容中英文。"""
         if not query:
             return []
         keywords: List[str] = []
-        for seg in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", query.lower()):
+        for seg in re.findall(r"[a-z0-9+#]+|[\u4e00-\u9fff]+", query.lower()):
             if not seg:
                 continue
             if seg[0].isascii():
@@ -157,17 +155,14 @@ class BingEngine(BaseSearchEngine):
         *,
         base_url: Optional[str] = None,
         region: Optional[str] = None,
-        setlang: Optional[str] = None,
         market: Optional[str] = None,
     ) -> str:
         """构建并获取搜索页面 HTML。
 
         Bing 的 query 参数只用 ``q`` + ``adlt`` + ``mkt``,语言偏好走 Accept-Language。
-        ``ensearch=1`` / ``cc`` / ``setlang`` / ``count`` 历史上传过但实测有害或被忽略。
 
         market / region 区分 ``None``(用 self.region 兜底) vs ``""``(明确不传 mkt)。
         """
-        del setlang
         base_url = base_url or self.base_urls[0]
         if market is not None:
             mkt = market
@@ -177,7 +172,7 @@ class BingEngine(BaseSearchEngine):
             mkt = self.region or ""
 
         params: dict[str, str] = {"q": query, "adlt": "off"}
-        if mkt and mkt != "clear":
+        if mkt:
             params["mkt"] = mkt
 
         if mkt and "-" in mkt:
@@ -197,14 +192,13 @@ class BingEngine(BaseSearchEngine):
         """Per-request 抓取,不污染 self.headers,避免并发下 Accept-Language 跨请求泄漏。
 
         与 base._get_html 行为等价,但 headers 用本地 dict 而非共享实例属性。
+        accept_language=None 时保留 base 默认值(en-GB,en;q=0.5),不显式删 header。
         """
         headers = dict(self.headers)
         headers["Referer"] = url
         headers["User-Agent"] = random.choice(USER_AGENTS)
         if accept_language:
             headers["Accept-Language"] = accept_language
-        else:
-            headers.pop("Accept-Language", None)
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 url,
@@ -283,19 +277,16 @@ class BingEngine(BaseSearchEngine):
             zh_variant = {
                 "base_url": "https://cn.bing.com",
                 "region": self.region,
-                "setlang": self.setlang,
                 "market": self.region,
             }
             zh_fallback = {
                 "base_url": "https://www.bing.com",
                 "region": self.region,
-                "setlang": self.setlang,
                 "market": self.region,
             }
             en_variant = {
                 "base_url": "https://www.bing.com",
                 "region": "",
-                "setlang": "en",
                 "market": "",
             }
             fetch_variants = [en_variant] if is_english else [zh_variant, zh_fallback, en_variant]
