@@ -1,13 +1,33 @@
 import json
 import logging
+import random
 import re
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode, urlparse
+
+import aiohttp
 from bs4 import BeautifulSoup
 
-from .base import BaseSearchEngine, SearchResult
+from .base import BaseSearchEngine, SearchResult, USER_AGENTS
 
 logger = logging.getLogger(__name__)
+
+
+# 高频词过滤,目的是让相关性判定有意义。
+_STOPWORDS_EN = frozenset({
+    "a", "an", "the", "and", "or", "but", "if", "of", "in", "on", "at", "to",
+    "for", "from", "by", "with", "is", "are", "was", "were", "be", "been",
+    "being", "has", "have", "had", "do", "does", "did", "will", "would",
+    "can", "could", "should", "shall", "may", "might", "must", "this", "that",
+    "these", "those", "it", "its", "as", "we", "you", "they", "he", "she",
+})
+_STOPWORDS_ZH = frozenset({
+    "的", "了", "是", "在", "我", "你", "他", "她", "它", "和", "与", "或",
+    "但", "如果", "怎样", "怎么", "如何", "什么", "为什么", "为何", "是否",
+    "应该", "可以", "能否", "哪个", "哪些", "哪里", "这个", "那个",
+})
+
+_ENGLISH_ONLY_RE = re.compile(r"^[a-z0-9\s\.\?\!,\-\:\;'\"\(\)\+#]+$")
 
 
 class BingEngine(BaseSearchEngine):
@@ -15,8 +35,6 @@ class BingEngine(BaseSearchEngine):
 
     base_urls: List[str]
     region: str
-    setlang: str
-    count: int
 
     SELECTOR_CONFIG: Dict[str, Dict[str, Any]] = {
         "url": {
@@ -69,33 +87,45 @@ class BingEngine(BaseSearchEngine):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(config)
+        # cn 优先(多数中国大陆用户场景下中文索引最优), www 兜底(海外 IP 时 cn 给空骨架)。
         self.base_urls = ["https://cn.bing.com", "https://www.bing.com"]
         self.region = self.config.get("region", "zh-CN")
-        self.setlang = self.config.get("setlang", "zh")
-        self.count = self.config.get("count", 10)
 
     def _build_keywords(self, query: str) -> List[str]:
-        """构建用于相关性过滤的关键词列表，兼容中英文。"""
+        """构建用于相关性过滤的关键词列表,兼容中英文。"""
         if not query:
             return []
-        pieces: List[str] = []
-        for token in re.split(r"\s+", query.lower().strip()):
-            if not token:
+        keywords: List[str] = []
+        for seg in re.findall(r"[a-z0-9+#]+|[\u4e00-\u9fff]+", query.lower()):
+            if not seg:
                 continue
-            words = re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", token)
-            if words:
-                pieces.extend(words)
+            if seg[0].isascii():
+                if seg in _STOPWORDS_EN or len(seg) < 2:
+                    continue
+                keywords.append(seg)
             else:
-                pieces.append(token)
-        return [p for p in pieces if len(p) >= 2]
+                if len(seg) <= 4:
+                    if seg not in _STOPWORDS_ZH:
+                        keywords.append(seg)
+                else:
+                    # 长中文段切 bigram,避免整段一坨永远不命中
+                    for i in range(len(seg) - 1):
+                        bigram = seg[i : i + 2]
+                        if bigram not in _STOPWORDS_ZH:
+                            keywords.append(bigram)
+        seen: set[str] = set()
+        return [kw for kw in keywords if not (kw in seen or seen.add(kw))]
 
     def _is_relevant(self, title: str, snippet: str, url: str, keywords: List[str]) -> bool:
-        """粗粒度过滤：标题/摘要/URL 命中至少一个关键词即通过。"""
+        """命中数 ≥ 1 即通过。
+
+        阈值保持宽松——目标是滤掉与 query 完全无关的广告/导航页,不是修正 Bing 的跑偏。
+        Bing 严重跑偏的 case(诺贝尔奖/best 字典)交给下游 LLM 或上层 EngineChain 切其他引擎。
+        """
         if not keywords:
             return True
         text = f"{title} {snippet} {url}".lower()
-        match_count = sum(1 for kw in keywords if kw in text)
-        return match_count >= 1
+        return any(kw in text for kw in keywords)
 
     def _is_blocked(self, url: str) -> bool:
         """域名黑名单过滤。"""
@@ -123,39 +153,59 @@ class BingEngine(BaseSearchEngine):
         *,
         base_url: Optional[str] = None,
         region: Optional[str] = None,
-        setlang: Optional[str] = None,
         market: Optional[str] = None,
     ) -> str:
-        """构建并获取搜索页面的 HTML 内容。
+        """构建并获取搜索页面 HTML。
 
-        Args:
-            query: 搜索查询词。
-            base_url: 基础域名，默认先用 cn，再回退 www。
-            region: 区域代码（cc），影响市场。
-            setlang: 语言参数。
-            market: 市场参数（mkt），可用于强制 en-US 等。
+        Bing 的 query 参数只用 ``q`` + ``adlt`` + ``mkt``,语言偏好走 Accept-Language。
 
-        Returns:
-            HTML 文本。
+        market / region 区分 ``None``(用 self.region 兜底) vs ``""``(明确不传 mkt)。
         """
         base_url = base_url or self.base_urls[0]
-        region = region or self.region
-        setlang = setlang or self.setlang
-        params = {
-            "q": query,
-            "setlang": setlang,
-            "count": str(min(self.count, 50)),
-            "ensearch": "1",
-        }
-        if region:
-            params["cc"] = region.split("-")[0] if "-" in region else region
-        if market:
-            params["mkt"] = market
+        if market is not None:
+            mkt = market
+        elif region is not None:
+            mkt = region
+        else:
+            mkt = self.region or ""
+
+        params: dict[str, str] = {"q": query, "adlt": "off"}
+        if mkt:
+            params["mkt"] = mkt
+
+        if mkt and "-" in mkt:
+            lang = mkt.split("-")[0]
+            accept_language: Optional[str] = f"{mkt},{lang};q=0.9"
+        elif mkt:
+            accept_language = f"{mkt};q=0.9"
+        else:
+            accept_language = None
 
         query_string = urlencode(params)
         search_url = f"{base_url}/search?{query_string}"
         logger.info(f"Requesting Bing search URL: {search_url}")
-        return await self._get_html(search_url)
+        return await self._fetch(search_url, accept_language=accept_language)
+
+    async def _fetch(self, url: str, *, accept_language: Optional[str] = None) -> str:
+        """Per-request 抓取,不污染 self.headers,避免并发下 Accept-Language 跨请求泄漏。
+
+        与 base._get_html 行为等价,但 headers 用本地 dict 而非共享实例属性。
+        accept_language=None 时保留 base 默认值(en-GB,en;q=0.5),不显式删 header。
+        """
+        headers = dict(self.headers)
+        headers["Referer"] = url
+        headers["User-Agent"] = random.choice(USER_AGENTS)
+        if accept_language:
+            headers["Accept-Language"] = accept_language
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
+                proxy=self.proxy,
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.text()
 
     def _get_link_elements(self, soup: BeautifulSoup) -> List[Any]:
         """获取搜索结果节点，包含主选择器和回退。"""
@@ -196,6 +246,11 @@ class BingEngine(BaseSearchEngine):
             url_elem = self._select_with_fallback(link, "url")
             text_elem = self._select_with_fallback(link, "text")
 
+            # Bing 在 snippet 里插入 "🌐 翻译此页" 等装饰 span,extract 前去掉免得污染。
+            if text_elem is not None:
+                for icon in text_elem.select("span.algoSlug_icon"):
+                    icon.decompose()
+
             title = self.tidy_text(title_elem.text) if title_elem else ""
             url_raw = url_elem.get("href") if url_elem else ""
             url = self._normalize_url(url_raw)
@@ -206,23 +261,33 @@ class BingEngine(BaseSearchEngine):
         return results
 
     async def search(self, query: str, num_results: int) -> List[SearchResult]:
-        """执行搜索，使用多区域尝试与选择器回退。"""
+        """多 variant 顺序尝试,首个非空结果 break。过滤后 0 时返回空,交给上层换引擎。
+
+        英文 query 不传 mkt——实测 mkt=en-US 会触发 Bing 短词命名实体模式,
+        "best practices for python asyncio timeout" 会被搜成 "best" 返字典/Best Buy。
+        """
         try:
             keywords = self._build_keywords(query)
-            fetch_variants = [
-                {
-                    "base_url": self.base_urls[0],
-                    "region": self.region,
-                    "setlang": self.setlang,
-                    "market": self.region,
-                },
-                {
-                    "base_url": self.base_urls[1] if len(self.base_urls) > 1 else self.base_urls[0],
-                    "region": "en-US",
-                    "setlang": "en",
-                    "market": "en-US",
-                },
-            ]
+            is_english = bool(_ENGLISH_ONLY_RE.fullmatch(query.lower().strip()))
+            # 中文 query: cn 优先(中国大陆 IP 最优),www 兜底(海外 IP 时 cn 空骨架自动 fall through)
+            # 英文 query: 只走 www 不传 mkt(cn 对英文 query 偏返中文翻译/字典页;
+            #            zh_fallback 带 mkt 会触发 Bing 短词命名实体模式,故不作为英文 fallback)
+            zh_variant = {
+                "base_url": "https://cn.bing.com",
+                "region": self.region,
+                "market": self.region,
+            }
+            zh_fallback = {
+                "base_url": "https://www.bing.com",
+                "region": self.region,
+                "market": self.region,
+            }
+            en_variant = {
+                "base_url": "https://www.bing.com",
+                "region": "",
+                "market": "",
+            }
+            fetch_variants = [en_variant] if is_english else [zh_variant, zh_fallback, en_variant]
 
             results: List[SearchResult] = []
             for variant in fetch_variants:
@@ -262,7 +327,6 @@ class BingEngine(BaseSearchEngine):
                 "FORM": "HDRSC2"
             }
 
-            # 尝试多个Bing图片搜索域名
             html = ""
             successful_base_url = ""
             for base_url in self.base_urls:
@@ -284,12 +348,10 @@ class BingEngine(BaseSearchEngine):
             soup = BeautifulSoup(html, "html.parser")
             results = []
 
-            # 解析图片结果 - Bing图片搜索的HTML结构
             image_elements = soup.select("a.iusc")
 
             for elem in image_elements[:num_results]:
                 try:
-                    # 尝试从m属性获取JSON数据
                     m_attr = elem.get("m")
                     if m_attr:
                         try:
@@ -306,15 +368,12 @@ class BingEngine(BaseSearchEngine):
                                 })
                                 continue
                         except json.JSONDecodeError:
-                            # JSON解析失败，尝试备用方法
                             pass
 
-                    # 备用解析：从img标签获取
                     img_elem = elem.find("img")
                     if img_elem:
                         image_url = img_elem.get("src") or img_elem.get("data-src")
                         if image_url:
-                            # 处理相对路径
                             if image_url.startswith("//"):
                                 image_url = "https:" + image_url
                             elif image_url.startswith("/") and successful_base_url:
