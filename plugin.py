@@ -26,6 +26,7 @@ from .pipelines.llm_runner import LLMRunner
 from .pipelines.search_pipeline import SearchPipeline
 from .pipelines.url_pipeline import UrlPipeline, is_url
 from .pipelines.zhihu_extractor import ZhihuExtractor
+from .tools.rewrite_output import ALLOWED_TAVILY_TOPICS
 from .translators.nbnhhsh import NbnhhshTranslator
 
 
@@ -211,8 +212,6 @@ class GoogleSearchPlugin(MaiBotPlugin):
             return {"name": "web_search", "content": ""}
 
         # tavily_topic 校验
-        from .tools.rewrite_output import ALLOWED_TAVILY_TOPICS
-
         normalized_topic = (tavily_topic or "").strip().lower()
         topic_override = normalized_topic if normalized_topic in ALLOWED_TAVILY_TOPICS else None
 
