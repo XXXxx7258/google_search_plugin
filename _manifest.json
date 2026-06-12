@@ -95,7 +95,9 @@
     "config.get",
     "send.text",
     "send.image",
-    "send.forward"
+    "send.forward",
+    "component.enable",
+    "component.disable"
   ],
   "i18n": {
     "default_locale": "zh-CN",

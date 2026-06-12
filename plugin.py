@@ -4,7 +4,7 @@
 
 提供三个面向 LLM 的组件:
 - ``@Tool("web_search")``             主搜索工具(支持 URL 直访)
-- ``@Tool("abbreviation_translate")`` 缩写翻译(神奇海螺 nbnhhsh)
+- ``@Tool("abbreviation_translate")`` 缩写翻译(神奇海螺 nbnhhsh;关闭时置为禁用态,不暴露给 planner)
 - ``@Action("image_search")``         图片搜索(handler 内按配置短路)
 
 外加一个 ``/google_search_status`` 诊断命令。
@@ -87,6 +87,49 @@ class GoogleSearchPlugin(MaiBotPlugin):
             self._build_pipelines()
         except Exception as exc:  # noqa: BLE001
             self.ctx.logger.error("重建 pipelines 失败: %s", exc, exc_info=True)
+        await self._sync_translation_tool_state()
+
+    def get_components(self) -> list[dict[str, Any]]:
+        """收集组件声明,并按配置写入 abbreviation_translate 的初始启用态。
+
+        关闭缩写翻译时不能直接从声明中剔除该工具:组件不进注册表的话,
+        运行时热启用会因"未找到组件"失败,只能重载插件恢复。
+        因此保持注册、仅置为禁用态,使其不暴露给 planner 的 tool_search。
+        """
+        components = super().get_components()
+        try:
+            translation_enabled = bool(self.config.translation.enabled)
+        except Exception:  # noqa: BLE001
+            translation_enabled = True
+        for comp in components:
+            if comp.get("name") == "abbreviation_translate":
+                metadata = comp.get("metadata")
+                if isinstance(metadata, dict):
+                    metadata["enabled"] = translation_enabled
+        return components
+
+    async def _sync_translation_tool_state(self) -> None:
+        """按当前配置热切换 abbreviation_translate 工具的启用状态。
+
+        宿主侧 enable/disable 仅翻转内存态,重启后以注册元数据
+        (见 ``get_components``)为准,两者互补无需持久化。
+        """
+        enabled = bool(self.config.translation.enabled)
+        try:
+            if enabled:
+                result = await self.ctx.component.enable_component("abbreviation_translate", "tool")
+            else:
+                result = await self.ctx.component.disable_component("abbreviation_translate", "tool")
+        except Exception as exc:  # noqa: BLE001
+            self.ctx.logger.warning("切换 abbreviation_translate 启用状态失败: %s", exc)
+            return
+        if isinstance(result, dict) and not result.get("success", False):
+            self.ctx.logger.warning(
+                "切换 abbreviation_translate 启用状态被拒绝: %s",
+                result.get("error", "未知原因"),
+            )
+        else:
+            self.ctx.logger.info("abbreviation_translate 工具已%s", "启用" if enabled else "禁用")
 
     def _build_pipelines(self) -> None:
         """从 self.config 装配所有运行时组件。"""
